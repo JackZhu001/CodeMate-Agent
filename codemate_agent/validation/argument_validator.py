@@ -94,6 +94,15 @@ class ArgumentValidator:
             # 某些工具可能不需要参数
             rules = cls.TOOL_PARAM_RULES.get(tool_name, {})
             if rules.get("required"):
+                # 🆕 检测是否是写文件类工具，给出更有用的建议
+                if tool_name in ("write_file", "append_file", "edit_file"):
+                    return (
+                        f"工具 '{tool_name}' 参数为空（可能是输出被截断）。\n"
+                        f"建议：如果要写入大量代码，请分多次写入：\n"
+                        f"1. 先用 write_file 写入文件开头部分\n"
+                        f"2. 再用 append_file 追加剩余部分\n"
+                        f"3. 每次写入控制在 5000 字符以内"
+                    )
                 return f"工具 '{tool_name}' 缺少必填参数: {rules['required']}"
             return None
         
@@ -111,6 +120,13 @@ class ArgumentValidator:
             if required_param not in arguments:
                 return f"缺少必填参数: '{required_param}'"
             if not arguments[required_param]:
+                # 🆕 针对 content 为空给出更有用的建议
+                if required_param == "content":
+                    return (
+                        f"参数 'content' 为空。"
+                        f"这通常是因为内容太长被截断了。"
+                        f"请分多次写入：先用 write_file 写第一部分，再用 append_file 追加其余部分。"
+                    )
                 return f"参数 '{required_param}' 不能为空"
         
         # 检查最小长度

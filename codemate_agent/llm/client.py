@@ -52,7 +52,7 @@ class GLMClient:
         # 延迟导入 zhipuai
         try:
             from zhipuai import ZhipuAI
-            self.client = ZhipuAI(api_key=self.api_key)
+            self.client = ZhipuAI(api_key=self.api_key, base_url=self.base_url)
         except ImportError:
             raise ImportError("请安装 zhipuai 库: pip install zhipuai")
 
@@ -60,7 +60,7 @@ class GLMClient:
         self,
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 8192,  # 🆕 提高到 8K，支持更长的输出
     ) -> LLMResponse:
         """
         完成对话（支持原生 Function Calling）
@@ -68,7 +68,7 @@ class GLMClient:
         Args:
             messages: 消息列表
             tools: 工具列表（OpenAI 格式）
-            max_tokens: 最大生成 token 数
+            max_tokens: 最大生成 token 数（默认 8192）
 
         Returns:
             LLMResponse: 响应结果
@@ -101,7 +101,7 @@ class GLMClient:
         self,
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
-        max_tokens: int = 2048,
+        max_tokens: int = 8192,  # 🆕 提高到 8K
     ) -> Generator[str, None, None]:
         """
         流式完成对话
@@ -109,7 +109,7 @@ class GLMClient:
         Args:
             messages: 消息列表
             tools: 工具列表
-            max_tokens: 最大生成 token 数
+            max_tokens: 最大生成 token 数（默认 8192）
 
         Yields:
             str: 生成的内容片段

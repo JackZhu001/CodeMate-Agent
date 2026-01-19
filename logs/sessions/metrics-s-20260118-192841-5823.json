@@ -1,0 +1,22 @@
+{
+  "session_id": "s-20260118-192841-5823",
+  "model": "glm-4.7",
+  "start_time": "2026-01-18T19:28:41.698085",
+  "end_time": "2026-01-18T19:55:32.936240",
+  "duration_seconds": 1611.24,
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0
+  },
+  "estimated_cost": 0.0,
+  "execution": {
+    "total_rounds": 0,
+    "llm_calls": 0,
+    "tool_calls": {},
+    "errors": 0
+  },
+  "performance": {
+    "avg_llm_duration_ms": 0.0
+  }
+}

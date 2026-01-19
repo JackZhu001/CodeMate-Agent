@@ -1,0 +1,29 @@
+{
+  "session_id": "s-20260118-231857-14dc",
+  "model": "glm-4.7",
+  "start_time": "2026-01-18T23:18:57.288552",
+  "end_time": "2026-01-19T10:43:08.272781",
+  "duration_seconds": 41050.98,
+  "tokens": {
+    "input": 547087,
+    "output": 33371,
+    "total": 580458
+  },
+  "estimated_cost": 0.0714,
+  "execution": {
+    "total_rounds": 18,
+    "llm_calls": 16,
+    "tool_calls": {
+      "todo_write": 5,
+      "list_dir": 1,
+      "read_file": 7,
+      "skill": 1,
+      "write_file": 1,
+      "append_file": 5
+    },
+    "errors": 0
+  },
+  "performance": {
+    "avg_llm_duration_ms": 45696.8
+  }
+}

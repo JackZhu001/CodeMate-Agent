@@ -32,13 +32,15 @@ from codemate_agent.planner import TaskPlanner
 from codemate_agent.subagent import TaskTool
 from codemate_agent.validation import ArgumentValidator
 from codemate_agent.skill import SkillManager
+from codemate_agent.prompts import SYSTEM_PROMPT
+from codemate_agent.agent.loop_detector import LoopDetector
 
 
 # 需要用户确认的危险工具
 DANGEROUS_TOOLS = {
     "delete_file",
-    "write_file",  # 覆盖文件
-    "run_shell",   # 执行命令
+    "write_file",
+    "run_shell",
 }
 
 
@@ -54,32 +56,6 @@ class CodeMateAgent:
         Agent: 执行 list_dir → 返回文件列表
         LLM: "这个项目包含 main.py, config.py..."
     """
-
-    # 系统提示词：定义 Agent 的角色和行为
-    SYSTEM_PROMPT = """你是 CodeMate，一个专业的代码分析助手。
-
-你的任务是帮助开发者理解、分析和改进代码。
-
-## 工作方式
-1. 仔细分析用户的问题
-2. 使用合适的工具获取信息
-3. 基于工具返回的结果给出准确答案
-
-## 注意事项
-- 在给出最终答案前，确保已收集足够的信息
-- 如果工具执行失败，尝试其他方法
-- 保持回答简洁专业
-
-## 工具调用注意事项
-- 参数必须是实际值，不能是类型名称（如 'str', 'int', 'list', 'dict'）
-- file_path 必须是完整的文件路径字符串
-- content 必须是实际要写入的内容，不能是类型名称
-- 如果工具调用返回错误，请仔细阅读错误信息并更正参数后重试
-
-## 子代理使用指南
-- 使用 task 工具将复杂任务委托给子代理
-- 需要多步探索时，优先使用 subagent_type="explore"
-- 简单任务直接处理，不要过度使用子代理"""
 
     def __init__(
         self,
@@ -153,10 +129,14 @@ class CodeMateAgent:
         self._last_usage_tokens = 0
         # 上一次 API 报告的累计 token 数（用于检测累计值）
         self._last_reported_total_tokens = 0
-        # 用于检测循环：最近 N 次工具调用的签名
-        self._recent_tool_calls: list[str] = []
-        self._max_recent_calls = 10  # 保留最近 10 次调用记录
+        
+        # 循环检测器
+        self.loop_detector = LoopDetector(window_size=10)
         self._loop_count = 0  # 循环检测计数器
+        
+        # 连续失败跟踪（现在由 ToolExecutor 管理，这里只保留引用）
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
 
         # todo 进度跟踪
         self._todo_all_completed = False  # 所有 todo 是否完成
@@ -231,6 +211,10 @@ class CodeMateAgent:
             if skill_result is not None:
                 # skill 命令已处理，将 skill prompt 注入后继续执行
                 query = skill_result
+
+        # 注意: 渐进式 Skill 加载
+        # 不再自动注入完整 Skill 内容，而是让 LLM 通过 skill 工具按需加载
+        # 系统提示词中只包含 Skill 索引（name + description）
 
         # 记录用户输入
         self.logger.info(f"用户输入: {query[:100]}...")
@@ -423,26 +407,8 @@ class CodeMateAgent:
             )
             self.messages.append(assistant_msg)
 
-            # 步骤 2.5: 检测 LLM 是否声明使用 Skill
-            if response.content and not hasattr(self, '_skill_injected'):
-                skill_match = self._detect_skill_declaration(response.content)
-                if skill_match:
-                    skill_name = skill_match
-                    skill_prompt = self.skill_manager.prepare_execution(skill_name, query)
-                    if skill_prompt:
-                        self.logger.info(f"检测到 Skill 声明: {skill_name}，注入完整内容")
-                        # 注入 skill 完整内容作为 system 消息
-                        self.messages.append(Message(
-                            role="system",
-                            content=f"## Skill 指令: {skill_name}\n\n{skill_prompt}"
-                        ))
-                        self._skill_injected = True
-                        if self.trace_logger:
-                            self.trace_logger.log_event(
-                                TraceEventType.INFO,
-                                {"event": "skill_auto_triggered", "skill": skill_name},
-                                step=self.round_count,
-                            )
+            # 注意: 渐进式 Skill 加载
+            # 不再检测 LLM 声明，而是让 LLM 主动调用 skill 工具加载内容
 
             # 步骤 3: 检查 LLM 是否请求调用工具
             if response.tool_calls:
@@ -452,15 +418,8 @@ class CodeMateAgent:
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.function.name
                     arguments = tool_call.function.arguments
-                    # 生成调用签名（工具名 + 主要参数）
-                    try:
-                        call_signature = self._get_tool_call_signature(tool_name, arguments)
-                        self._recent_tool_calls.append(call_signature)
-                        if len(self._recent_tool_calls) > self._max_recent_calls:
-                            self._recent_tool_calls.pop(0)
-                    except Exception as e:
-                        self.logger.warning(f"签名生成失败: {e}")
-                        self._recent_tool_calls.append(f"{tool_name}|error")
+                    # 记录工具调用到循环检测器
+                    self.loop_detector.record_call(tool_name, arguments)
 
                 # 检测是否陷入循环
                 try:
@@ -469,7 +428,7 @@ class CodeMateAgent:
                         self._loop_count = loop_count
 
                         loop_warning = (
-                            f"检测到 Agent 陷入循环（第 {loop_count} 次，最近 {self._max_recent_calls} 次调用有重复模式）。"
+                            f"检测到 Agent 陷入循环（第 {loop_count} 次）。"
                         )
 
                         if loop_count >= 3:
@@ -477,8 +436,8 @@ class CodeMateAgent:
                             loop_warning += " 采取强制措施打破循环。"
                             self.logger.warning(loop_warning)
 
-                            # 清空最近的调用记录
-                            self._recent_tool_calls = []
+                            # 清空循环检测器
+                            self.loop_detector.reset()
                             self._loop_count = 0
 
                             # 添加强制干预消息
@@ -497,7 +456,7 @@ class CodeMateAgent:
                             if self.trace_logger:
                                 self.trace_logger.log_event(
                                     TraceEventType.WARNING,
-                                    {"message": loop_warning, "action": "forced_break", "recent_calls": self._recent_tool_calls},
+                                    {"message": loop_warning, "action": "forced_break", "recent_calls": self.loop_detector.recent_calls},
                                     step=self.round_count,
                                 )
                         else:
@@ -505,7 +464,7 @@ class CodeMateAgent:
                             if self.trace_logger:
                                 self.trace_logger.log_event(
                                     TraceEventType.WARNING,
-                                    {"message": loop_warning, "recent_calls": self._recent_tool_calls},
+                                    {"message": loop_warning, "recent_calls": self.loop_detector.recent_calls},
                                     step=self.round_count,
                                 )
                             # 添加警告消息
@@ -516,7 +475,7 @@ class CodeMateAgent:
                 except Exception as e:
                     self.logger.error(f"循环检测出错: {e}")
                     # 清空历史以防止持续出错
-                    self._recent_tool_calls = []
+                    self.loop_detector.reset()
 
                 # LLM 请求调用工具，执行所有工具调用
                 for tool_call in response.tool_calls:
@@ -551,6 +510,25 @@ class CodeMateAgent:
                         tool_call_id=tool_call.id,
                         name=tool_call.function.name
                     ))
+                
+                # 🆕 检测连续失败次数，超过阈值时强制停止并报告
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    failure_msg = (
+                        f"⚠️ 检测到连续 {self._consecutive_failures} 次工具调用失败。\n\n"
+                        "这通常意味着当前方法不可行。可能的原因：\n"
+                        "1. 内容过长，超过单次输出限制\n"
+                        "2. 参数格式不正确\n"
+                        "3. 目标文件/路径不存在\n\n"
+                        "建议：请尝试将任务分解为更小的步骤，或使用不同的方法。"
+                    )
+                    self.logger.warning(f"连续失败 {self._consecutive_failures} 次，注入干预消息")
+                    self.messages.append(Message(
+                        role="system",
+                        content=failure_msg
+                    ))
+                    # 重置计数器，给 LLM 一次机会改变策略
+                    self._consecutive_failures = 0
+                
                 # 工具结果已添加，继续循环，让 LLM 处理工具结果
             else:
                 # 没有工具调用，说明 LLM 已经给出最终答案
@@ -616,12 +594,18 @@ class CodeMateAgent:
         validation_error = self._validate_arguments(tool_name, arguments)
         if validation_error:
             self.logger.warning(f"参数验证失败: {validation_error}")
+            
+            # 🆕 增加连续失败计数
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                self.logger.error(f"连续 {self._consecutive_failures} 次工具调用失败，建议更换策略")
+            
             # 增强错误消息，包含工具正确用法示例
             tool = self.tool_registry.get(tool_name)
             if tool:
                 usage_hint = self._get_tool_usage_hint(tool_name, tool)
-                return f"错误: {validation_error}\n\n{usage_hint}"
-            return f"错误: {validation_error}。请提供正确的参数值。"
+                return f"错误: {validation_error}\n\n{usage_hint}\n\n⚠️ 这是连续第 {self._consecutive_failures} 次失败，请考虑更换方法。"
+            return f"错误: {validation_error}。请提供正确的参数值。（连续第 {self._consecutive_failures} 次失败）"
 
         # 记录工具调用开始
         self.logger.debug(f"执行工具: {tool_name}")
@@ -689,12 +673,18 @@ class CodeMateAgent:
             if self.metrics:
                 self.metrics.record_tool_call(tool_name, success=True)
 
+            # 🆕 工具执行成功，重置连续失败计数器
+            self._consecutive_failures = 0
+
             return result
 
         except Exception as e:
             # 工具执行失败，返回错误信息给 LLM
             # LLM 可以根据错误信息决定是否重试或使用其他方法
             error_msg = f"工具执行失败: {e}"
+            
+            # 🆕 增加连续失败计数
+            self._consecutive_failures += 1
 
             # 记录错误
             self.logger.error(f"{tool_name} 执行失败: {e}")
@@ -729,7 +719,7 @@ class CodeMateAgent:
         Returns:
             str: 完整的系统提示词
         """
-        prompt_parts = [self.SYSTEM_PROMPT]
+        prompt_parts = [SYSTEM_PROMPT]  # 使用模块级常量
 
         # 添加长期记忆
         if self.memory_manager:
@@ -840,8 +830,9 @@ class CodeMateAgent:
         self.total_tokens = 0
         self._last_usage_tokens = 0
         self._last_reported_total_tokens = 0
-        self._recent_tool_calls = []
-        self._loop_count = 0  # 重置循环计数器
+        self.loop_detector.reset()  # 重置循环检测器
+        self._loop_count = 0
+        self._consecutive_failures = 0
         self._skill_injected = False  # 重置 skill 注入标记
         # 重置规划器
         if self.planner:
@@ -1026,31 +1017,13 @@ class CodeMateAgent:
     def _is_stuck_in_loop(self) -> bool:
         """
         检测 Agent 是否陷入循环
-
-        通过分析最近的工具调用模式，检测是否有重复行为。
+        
+        委托给 LoopDetector 进行检测。
 
         Returns:
             是否陷入循环
         """
-        if len(self._recent_tool_calls) < 5:
-            return False
-
-        # 检查最近 5 次调用中是否有 3 次以上相同
-        recent = self._recent_tool_calls[-5:]
-
-        # 确保所有元素都是字符串（可以 hash）
-        str_recent = [str(call) for call in recent]
-        unique_count = len(set(str_recent))
-        if unique_count <= 2:
-            # 只有 1-2 种不同的调用，可能陷入循环
-            return True
-
-        # 检查是否有交替模式（A-B-A-B-A）
-        if len(str_recent) >= 5:
-            if str_recent[0] == str_recent[2] == str_recent[4] and str_recent[1] == str_recent[3]:
-                return True
-
-        return False
+        return self.loop_detector.is_stuck()
 
     def _validate_arguments(self, tool_name: str, arguments: dict) -> Optional[str]:
         """

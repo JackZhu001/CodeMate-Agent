@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeMate AI - 新人开发者指南</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <span class="logo-icon">🤖</span>
+                <span class="logo-text">CodeMate AI</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#overview">项目概览</a></li>
+                <li><a href="#capabilities">核心能力</a></li>
+                <li><a href="#architecture">架构设计</a></li>
+                <li><a href="#workflow">工作流程</a></li>
+                <li><a href="#notes">注意事项</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 主横幅 -->
+    <header class="hero">
+        <div class="hero-content">
+            <h1 class="hero-title">
+                <span class="gradient-text">CodeMate AI</span>
+            </h1>
+            <p class="hero-subtitle">基于 Function Calling 范式的智能代码分析助手</p>
+            <div class="hero-badges">
+                <span class="badge">v0.3.0</span>
+                <span class="badge">Python 3.10+</span>
+                <span class="badge">GLM-4</span>
+            </div>
+            <div class="hero-actions">
+                <a href="#overview" class="btn btn-primary">开始了解</a>
+                <a href="https://github.com" class="btn btn-secondary">查看源码</a>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                </div>
+                <pre class="code-content"><code class="language-python"><span class="keyword">from</span> codemate_agent <span class="keyword">import</span> CodeMateAgent
+
+agent = CodeMateAgent()
+result = agent.run(<span class="string">"分析这个项目"</span>)
+<span class="comment"># ✨ 智能分析完成</span></code></pre>
+            </div>
+        </div>
+    </header>
+
+    <!-- 项目概览 -->
+    <section id="overview" class="section">
+        <div class="container">
+            <h2 class="section-title">项目概览</h2>
+            <p class="section-subtitle">CodeMate AI 是一个帮助开发者快速理解和分析代码的智能助手</p>
+            
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-icon">🎯</div>
+                    <h3>项目目标</h3>
+                    <p>帮助开发者快速理解陌生项目的代码结构、搜索和分析代码内容、获取重构建议和最佳实践、自动化代码审查流程。</p>
+                </div>
+                <div class="card">
+                    <div class="card-icon">💡</div>
+                    <h3>核心理念</h3>
+                    <p>采用原生 Function Calling 范式，通过结构化的工具调用实现更可靠的代码分析，告别文本解析的不确定性。</p>
+                </div>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>原生 Function Calling</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>模块化工具系统</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>Pydantic 数据验证</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>简洁的 CLI 界面</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>三层日志架构</span>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">✅</span>
+                    <span>Token 统计</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 核心能力 -->
+    <section id="capabilities" class="section section-dark">
+        <div class="container">
+            <h2 class="section-title">核心能力</h2>
+            <p class="section-subtitle">CodeMate AI 提供全面的代码分析和开发辅助功能</p>
+            
+            <div class="capabilities-grid">
+                <div class="capability-card">
+                    <div class="capability-number">01</div>
+                    <h3>代码分析</h3>
+                    <p>读取和理解代码文件，分析项目结构，识别关键模块和依赖关系</p>
+                    <ul class="capability-list">
+                        <li>文件内容解析</li>
+                        <li>项目结构分析</li>
+                        <li>依赖关系识别</li>
+                    </ul>
+                </div>
+
+                <div class="capability-card">
+                    <div class="capability-number">02</div>
+                    <h3>代码搜索</h3>
+                    <p>搜索特定的代码模式，查找函数/类定义，全文搜索代码内容</p>
+                    <ul class="capability-list">
+                        <li>模式匹配搜索</li>
+                        <li>定义查找</li>
+                        <li>全文检索</li>
+                    </ul>
+                </div>
+
+                <div class="capability-card">
+                    <div class="capability-number">03</div>
+                    <h3>代码审查</h3>
+                    <p>检查安全漏洞，代码质量评估，最佳实践建议</p>
+                    <ul class="capability-list">
+                        <li>安全漏洞检测</li>
+                        <li>代码质量评估</li>
+                        <li>最佳实践建议</li>
+                    </ul>
+                </div>
+
+                <div class="capability-card">
+                    <div class="capability-number">04</div>
+                    <h3>重构建议</h3>
+                    <p>代码优化建议，结构改进方案，性能优化提示</p>
+                    <ul class="capability-list">
+                        <li>代码优化</li>
+                        <li>结构改进</li>
+                        <li>性能提示</li>
+                    </ul>
+                </div>
+
+                <div class="capability-card">
+                    <div class="capability-number">05</div>
+                    <h3>任务规划</h3>
+                    <p>自动分解复杂任务，生成执行计划，进度跟踪</p>
+                    <ul class="capability-list">
+                        <li>任务分解</li>
+                        <li>计划生成</li>
+                        <li>进度跟踪</li>
+                    </ul>
+                </div>
+
+                <div class="capability-card">
+                    <div class="capability-number">06</div>
+                    <h3>智能对话</h3>
+                    <p>交互式代码问答，持续对话上下文，多轮对话支持</p>
+                    <ul class="capability-list">
+                        <li>代码问答</li>
+                        <li>上下文记忆</li>
+                        <li>多轮对话</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 架构设计 -->
+    <section id="architecture" class="section">
+        <div class="container">
+            <h2 class="section-title">架构设计</h2>
+            <p class="section-subtitle">模块化、可扩展的系统架构</p>
+            
+            <div class="architecture-diagram">
+                <div class="arch-layer">
+                    <div class="layer-title">用户层</div>
+                    <div class="layer-components">
+                        <div class="component">CLI 入口</div>
+                        <div class="component">交互模式</div>
+                        <div class="component">单次查询</div>
+                    </div>
+                </div>
+                
+                <div class="arch-arrow">↓</div>
+                
+                <div class="arch-layer">
+                    <div class="layer-title">Agent 核心</div>
+                    <div class="layer-components">
+                        <div class="component">CodeMateAgent</div>
+                        <div class="component">循环检测</div>
+                        <div class="component">上下文管理</div>
+                    </div>
+                </div>
+                
+                <div class="arch-arrow">↓</div>
+                
+                <div class="arch-layer">
+                    <div class="layer-title">工具系统</div>
+                    <div class="layer-components">
+                        <div class="component">文件工具</div>
+                        <div class="component">搜索工具</div>
+                        <div class="component">Shell 工具</div>
+                        <div class="component">Todo 工具</div>
+                        <div class="component">Task 工具</div>
+                    </div>
+                </div>
+                
+                <div class="arch-arrow">↓</div>
+                
+                <div class="arch-layer">
+                    <div class="layer-title">基础服务</div>
+                    <div class="layer-components">
+                        <div class="component">LLM 客户端</div>
+                        <div class="component">日志系统</div>
+                        <div class="component">持久化</div>
+                        <div class="component">配置管理</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modules-grid">
+                <div class="module-card">
+                    <h4>🤖 Agent 核心</h4>
+                    <p>基于 Function Calling 的智能代理，负责协调工具调用和对话管理</p>
+                </div>
+                <div class="module-card">
+                    <h4>🔧 工具系统</h4>
+                    <p>模块化的工具注册和执行机制，支持文件操作、代码搜索、命令执行等</p>
+                </div>
+                <div class="module-card">
+                    <h4>📊 日志系统</h4>
+                    <p>三层日志架构：运行时日志、Trace 轨迹、Metrics 统计</p>
+                </div>
+                <div class="module-card">
+                    <h4>💾 持久化</h4>
+                    <p>会话存储、记忆管理、会话索引，支持长期记忆和会话回放</p>
+                </div>
+                <div class="module-card">
+                    <h4>🧠 任务规划</h4>
+                    <p>自动检测复杂任务，生成执行计划，跟踪任务进度</p>
+                </div>
+                <div class="module-card">
+                    <h4>⚡ Skill 系统</h4>
+                    <p>预定义的专业任务流程，如代码审查、UI/UX 设计等</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 工作流程 -->
+    <section id="workflow" class="section section-dark">
+        <div class="container">
+            <h2 class="section-title">工作流程</h2>
+            <p class="section-subtitle">从用户输入到最终答案的完整流程</p>
+            
+            <div class="workflow-container">
+                <div class="workflow-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>用户输入</h4>
+                        <p>用户通过 CLI 输入问题或任务</p>
+                        <div class="step-code">
+                            <code>./run.sh "分析这个项目"</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-arrow">→</div>
+
+                <div class="workflow-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>构建请求</h4>
+                        <p>Agent 构建包含工具列表的 LLM 请求</p>
+                        <div class="step-code">
+                            <code>messages + tools → LLM API</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-arrow">→</div>
+
+                <div class="workflow-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h4>LLM 推理</h4>
+                        <p>GLM-4 模型分析请求，决定是否调用工具</p>
+                        <div class="step-code">
+                            <code>tool_calls: [list_dir, path: "."]</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-arrow">→</div>
+
+                <div class="workflow-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h4>工具执行</h4>
+                        <p>执行工具并获取结果</p>
+                        <div class="step-code">
+                            <code>result: ["codemate_agent/", "tests/", ...]</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-arrow">→</div>
+
+                <div class="workflow-step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h4>结果返回</h4>
+                        <p>将工具结果返回给 LLM 继续推理</p>
+                        <div class="step-code">
+                            <code>tool message → LLM</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-arrow">→</div>
+
+                <div class="workflow-step">
+                    <div class="step-number">6</div>
+                    <div class="step-content">
+                        <h4>最终答案</h4>
+                        <p>LLM 生成最终答案并返回给用户</p>
+                        <div class="step-code">
+                            <code>"这个项目包含以下目录..."</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="workflow-note">
+                <strong>💡 关键特性：</strong>
+                <ul>
+                    <li><strong>Function Calling：</strong>LLM 直接返回结构化的 tool_calls，无需文本解析</li>
+                    <li><strong>自动循环：</strong>Agent 自动处理多轮工具调用，直到获取最终答案</li>
+                    <li><strong>上下文管理：</strong>维护完整的对话历史，支持多轮交互</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- 注意事项 -->
+    <section id="notes" class="section">
+        <div class="container">
+            <h2 class="section-title">注意事项</h2>
+            <p class="section-subtitle">使用 CodeMate AI 时需要了解的重要信息</p>
+            
+            <div class="notes-container">
+                <div class="note-category">
+                    <h3 class="note-category-title">🔒 安全注意事项</h3>
+                    <div class="note-items">
+                        <div class="note-item warning">
+                            <div class="note-icon">⚠️</div>
+                            <div class="note-content">
+                                <h4>Shell 命令注入风险</h4>
+                                <p>Shell 工具存在命令注入风险，建议使用命令白名单而非黑名单过滤</p>
+                            </div>
+                        </div>
+                        <div class="note-item warning">
+                            <div class="note-icon">⚠️</div>
+                            <div class="note-content">
+                                <h4>路径遍历漏洞</h4>
+                                <p>文件操作工具可能访问项目外文件，需要添加路径验证</p>
+                            </div>
+                        </div>
+                        <div class="note-item warning">
+                            <div class="note-icon">⚠️</div>
+                            <div class="note-content">
+                                <h4>API 密钥安全</h4>
+                                <p>请妥善保管 GLM_API_KEY，不要提交到版本控制系统</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="note-category">
+                    <h3 class="note-category-title">⚙️ 配置说明</h3>
+                    <div class="note-items">
+                        <div class="note-item info">
+                            <div class="note-icon">ℹ️</div>
+                            <div class="note-content">
+                                <h4>环境变量配置</h4>
+                                <p>创建 .env 文件并配置 GLM_API_KEY、GLM_MODEL 等参数</p>
+                            </div>
+                        </div>
+                        <div class="note-item info">
+                            <div class="note-icon">ℹ️</div>
+                            <div class="note-content">
+                                <h4>模型选择</h4>
+                                <p>glm-4-flash 速度快成本低，glm-4-plus 能力更强成本更高</p>
+                            </div>
+                        </div>
+                        <div class="note-item info">
+                            <div class="note-icon">ℹ️</div>
+                            <div class="note-content">
+                                <h4>日志配置</h4>
+                                <p>支持运行时日志、Trace 轨迹和 Metrics 统计三种日志类型</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="note-category">
+                    <h3 class="note-category-title">📚 使用建议</h3>
+                    <div class="note-items">
+                        <div class="note-item success">
+                            <div class="note-icon">✅</div>
+                            <div class="note-content">
+                                <h4>从简单任务开始</h4>
+                                <p>先尝试简单的代码分析任务，熟悉工具的使用方式</p>
+                            </div>
+                        </div>
+                        <div class="note-item success">
+                            <div class="note-icon">✅</div>
+                            <div class="note-content">
+                                <h4>查看 Trace 日志</h4>
+                                <p>通过 Trace 日志了解 Agent 的决策过程和工具调用情况</p>
+                            </div>
+                        </div>
+                        <div class="note-item success">
+                            <div class="note-icon">✅</div>
+                            <div class="note-content">
+                                <h4>利用 Skill 系统</h4>
+                                <p>使用预定义的 Skill（如 code-review）快速完成专业任务</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="note-category">
+                    <h3 class="note-category-title">🐛 已知问题</h3>
+                    <div class="note-items">
+                        <div class="note-item error">
+                            <div class="note-icon">❌</div>
+                            <div class="note-content">
+                                <h4>API 调用无重试</h4>
+                                <p>网络不稳定时可能导致任务失败，建议手动重试</p>
+                            </div>
+                        </div>
+                        <div class="note-item error">
+                            <div class="note-icon">❌</div>
+                            <div class="note-content">
+                                <h4>测试覆盖率不足</h4>
+                                <p>核心模块测试覆盖率约 17%，建议谨慎使用</p>
+                            </div>
+                        </div>
+                        <div class="note-item error">
+                            <div class="note-icon">❌</div>
+                            <div class="note-content">
+                                <h4>类型提示不一致</h4>
+                                <p>部分代码使用 list[str]，部分使用 List[str]，需要统一</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-start">
+                <h3>🚀 快速开始</h3>
+                <div class="quick-start-steps">
+                    <div class="qs-step">
+                        <span class="qs-number">1</span>
+                        <div class="qs-content">
+                            <h4>安装依赖</h4>
+                            <code>pip install -r requirements.txt</code>
+                        </div>
+                    </div>
+                    <div class="qs-step">
+                        <span class="qs-number">2</span>
+                        <div class="qs-content">
+                            <h4>配置环境</h4>
+                            <code>cp .env.example .env && 编辑 .env</code>
+                        </div>
+                    </div>
+                    <div class="qs-step">
+                        <span class="qs-number">3</span>
+                        <div class="qs-content">
+                            <h4>运行 Agent</h4>
+                            <code>./run.sh</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>CodeMate AI</h4>
+                    <p>基于 Function Calling 范式的智能代码分析助手</p>
+                </div>
+                <div class="footer-section">
+                    <h4>文档</h4>
+                    <ul>
+                        <li><a href="#overview">项目概览</a></li>
+                        <li><a href="#capabilities">核心能力</a></li>
+                        <li><a href="#architecture">架构设计</a></li>
+                        <li><a href="#notes">注意事项</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>资源</h4>
+                    <ul>
+                        <li><a href="#">GitHub</a></li>
+                        <li><a href="#">API 文档</a></li>
+                        <li><a href="#">示例项目</a></li>
+                        <li><a href="#">贡献指南</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>版本信息</h4>
+                    <p>当前版本：v0.3.0</p>
+                    <p>Python：3.10+</p>
+                    <p>LLM：GLM-4</p>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 CodeMate AI. 基于 MIT License 开源</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

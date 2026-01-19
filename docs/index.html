@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeMate AI - 智能代码分析助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #00d4ff;
+            --secondary-color: #7c3aed;
+            --bg-dark: #0f172a;
+            --bg-darker: #020617;
+            --bg-card: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: #334155;
+            --accent-gradient: linear-gradient(135deg, #00d4ff 0%, #7c3aed 100%);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, var(--bg-darker) 0%, var(--bg-dark) 100%);
+            padding: 2rem 0;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        nav ul {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+
+        nav a:hover {
+            color: var(--primary-color);
+        }
+
+        /* Hero Section */
+        .hero {
+            padding: 6rem 2rem;
+            text-align: center;
+            background: radial-gradient(ellipse at center, rgba(0, 212, 255, 0.1) 0%, transparent 70%);
+        }
+
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto 2rem;
+        }
+
+        .hero .version {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 2rem;
+            font-size: 0.875rem;
+            color: var(--primary-color);
+        }
+
+        /* Section */
+        section {
+            padding: 4rem 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            position: relative;
+        }
+
+        .section-title::after {
+            content: '';
+            display: block;
+            width: 80px;
+            height: 4px;
+            background: var(--accent-gradient);
+            margin: 1rem auto 0;
+            border-radius: 2px;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 2rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0, 212, 255, 0.1);
+            border-color: var(--primary-color);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            color: var(--primary-color);
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+        }
+
+        /* Core Capabilities */
+        .capabilities {
+            background: var(--bg-darker);
+        }
+
+        .capability-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .capability-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .capability-number {
+            font-size: 2rem;
+            font-weight: bold;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+        }
+
+        .capability-item h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .capability-item p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* Architecture */
+        .architecture-diagram {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 3rem;
+            margin-top: 2rem;
+        }
+
+        .arch-flow {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .arch-step {
+            background: var(--bg-darker);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem 2rem;
+            text-align: center;
+            max-width: 500px;
+            transition: border-color 0.3s;
+        }
+
+        .arch-step:hover {
+            border-color: var(--primary-color);
+        }
+
+        .arch-step h4 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .arch-arrow {
+            font-size: 2rem;
+            color: var(--text-secondary);
+        }
+
+        /* Module List */
+        .modules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .module-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .module-card h4 {
+            color: var(--primary-color);
+            margin-bottom: 0.75rem;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 1rem;
+        }
+
+        .module-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .module-path {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            background: var(--bg-darker);
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            display: inline-block;
+        }
+
+        /* Notes Section */
+        .notes {
+            background: var(--bg-darker);
+        }
+
+        .note-item {
+            display: flex;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border-left: 4px solid var(--primary-color);
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .note-icon {
+            font-size: 1.5rem;
+        }
+
+        .note-content h4 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .note-content p {
+            color: var(--text-secondary);
+        }
+
+        /* Tech Stack */
+        .tech-stack {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .tech-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 2rem;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        .tech-item:hover {
+            border-color: var(--primary-color);
+            background: var(--bg-darker);
+        }
+
+        /* Footer */
+        footer {
+            background: var(--bg-darker);
+            padding: 3rem 2rem;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+        }
+
+        footer p {
+            color: var(--text-secondary);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .section-title {
+                font-size: 2rem;
+            }
+
+            nav ul {
+                display: none;
+            }
+
+            .features-grid,
+            .capabilities-list,
+            .modules-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="header-content">
+            <div class="logo">🤖 CodeMate AI</div>
+            <nav>
+                <ul>
+                    <li><a href="#overview">项目概览</a></li>
+                    <li><a href="#features">核心能力</a></li>
+                    <li><a href="#architecture">架构设计</a></li>
+                    <li><a href="#modules">核心模块</a></li>
+                    <li><a href="#notes">注意事项</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <span class="version">v0.3.0</span>
+            <h1>CodeMate AI</h1>
+            <p>基于 Function Calling 范式的智能代码分析助手<br>使用智谱 AI GLM-4 模型构建，帮助开发者快速理解、分析和改进代码</p>
+        </div>
+    </section>
+
+    <!-- Overview Section -->
+    <section id="overview">
+        <div class="container">
+            <h2 class="section-title">项目概览</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>项目目标</h3>
+                    <p>帮助开发者快速理解陌生项目的代码结构、搜索和分析代码内容、获取重构建议和最佳实践、自动化代码审查流程。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>核心特性</h3>
+                    <p>原生 Function Calling、模块化工具系统、Pydantic 数据验证、简洁的 CLI、三层日志架构、Token 统计。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🏗️</div>
+                    <h3>技术架构</h3>
+                    <p>基于 Python 3.10+、GLM-4 API、Pydantic 2.x、Rich 终端 UI、prompt-toolkit 交互式输入构建。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Core Capabilities -->
+    <section id="features" class="capabilities">
+        <div class="container">
+            <h2 class="section-title">核心能力</h2>
+            <div class="capability-list">
+                <div class="capability-item">
+                    <div class="capability-number">01</div>
+                    <div>
+                        <h4>代码分析</h4>
+                        <p>读取和理解代码文件、分析项目结构、识别关键模块和依赖关系</p>
+                    </div>
+                </div>
+                <div class="capability-item">
+                    <div class="capability-number">02</div>
+                    <div>
+                        <h4>代码搜索</h4>
+                        <p>搜索特定的代码模式、查找函数/类定义、全文搜索代码内容</p>
+                    </div>
+                </div>
+                <div class="capability-item">
+                    <div class="capability-number">03</div>
+                    <div>
+                        <h4>代码审查</h4>
+                        <p>检查安全漏洞、代码质量评估、最佳实践建议</p>
+                    </div>
+                </div>
+                <div class="capability-item">
+                    <div class="capability-number">04</div>
+                    <div>
+                        <h4>重构建议</h4>
+                        <p>代码优化建议、结构改进方案、性能优化提示</p>
+                    </div>
+                </div>
+                <div class="capability-item">
+                    <div class="capability-number">05</div>
+                    <div>
+                        <h4>任务规划</h4>
+                        <p>自动分解复杂任务、生成执行计划、进度跟踪</p>
+                    </div>
+                </div>
+                <div class="capability-item">
+                    <div class="capability-number">06</div>
+                    <div>
+                        <h4>子代理协作</h4>
+                        <p>支持任务委托、代码探索、计划生成、信息总结</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section id="architecture">
+        <div class="container">
+            <h2 class="section-title">架构与流程</h2>
+            <p style="text-align: center; color: var(--text-secondary); max-width: 700px; margin: 0 auto 2rem;">
+                CodeMate AI 采用基于 Function Calling 的 Agent 循环架构，与传统 ReAct 范式相比，LLM 直接返回结构化的 tool_calls，更加可靠。
+            </p>
+            <div class="architecture-diagram">
+                <div class="arch-flow">
+                    <div class="arch-step">
+                        <h4>步骤 1: 接收用户输入</h4>
+                        <p>用户通过 CLI 提出问题或任务</p>
+                    </div>
+                    <div class="arch-arrow">↓</div>
+                    <div class="arch-step">
+                        <h4>步骤 2: 调用 LLM</h4>
+                        <p>带上工具列表，让 LLM 决定是否需要调用工具</p>
+                    </div>
+                    <div class="arch-arrow">↓</div>
+                    <div class="arch-step">
+                        <h4>步骤 3: 执行工具</h4>
+                        <p>如果 LLM 请求调用工具，执行工具并获取结果</p>
+                    </div>
+                    <div class="arch-arrow">↓</div>
+                    <div class="arch-step">
+                        <h4>步骤 4: 返回结果</h4>
+                        <p>将工具结果返回给 LLM，重复步骤 2-4</p>
+                    </div>
+                    <div class="arch-arrow">↓</div>
+                    <div class="arch-step">
+                        <h4>步骤 5: 给出答案</h4>
+                        <p>LLM 给出最终答案，或达到最大轮数限制</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Core Modules -->
+    <section id="modules" class="capabilities">
+        <div class="container">
+            <h2 class="section-title">核心模块</h2>
+            <div class="modules-grid">
+                <div class="module-card">
+                    <h4>🤖 Agent 核心</h4>
+                    <p>实现基于 Function Calling 的 Agent 循环，处理用户输入、调用 LLM、执行工具、返回结果</p>
+                    <span class="module-path">codemate_agent/agent/agent.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>🧠 LLM 客户端</h4>
+                    <p>与智谱 GLM API 通信，管理 API 密钥、处理 Function Calling 请求、Token 统计</p>
+                    <span class="module-path">codemate_agent/llm/client.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>🔧 工具系统</h4>
+                    <p>模块化工具管理，支持文件、搜索、Shell、Todo、Task 等多种工具类型</p>
+                    <span class="module-path">codemate_agent/tools/registry.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>📊 数据模型</h4>
+                    <p>定义 Message、ToolCall、LLMResponse、TokenUsage 等核心数据结构</p>
+                    <span class="module-path">codemate_agent/schema.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>📝 日志系统</h4>
+                    <p>三层日志架构：运行时日志、Trace 轨迹日志、Metrics 统计</p>
+                    <span class="module-path">codemate_agent/logging/</span>
+                </div>
+                <div class="module-card">
+                    <h4>💻 CLI 入口</h4>
+                    <p>命令行交互入口，支持交互模式和单次查询模式</p>
+                    <span class="module-path">codemate_agent/cli.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>📋 任务规划器</h4>
+                    <p>检测复杂任务并生成执行计划，自动分解任务、跟踪进度</p>
+                    <span class="module-path">codemate_agent/planner/planner.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>💾 持久化系统</h4>
+                    <p>会话存储、记忆管理、会话索引，支持对话历史的持久化</p>
+                    <span class="module-path">codemate_agent/persistence/</span>
+                </div>
+                <div class="module-card">
+                    <h4>🗜️ 上下文压缩</h4>
+                    <p>处理长对话的上下文压缩，检测长度、压缩历史、截断输出</p>
+                    <span class="module-path">codemate_agent/context/compressor.py</span>
+                </div>
+                <div class="module-card">
+                    <h4>🎯 Skill 系统</h4>
+                    <p>支持预定义的专业任务流程，如代码审查等</p>
+                    <span class="module-path">codemate_agent/skill/</span>
+                </div>
+                <div class="module-card">
+                    <h4>👥 子代理系统</h4>
+                    <p>支持任务委托给子代理，包括通用、探索、规划、总结等类型</p>
+                    <span class="module-path">codemate_agent/subagent/</span>
+                </div>
+                <div class="module-card">
+                    <h4>✅ 验证模块</h4>
+                    <p>统一验证工具调用参数，类型验证、值检查、使用提示</p>
+                    <span class="module-path">codemate_agent/validation/argument_validator.py</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Notes Section -->
+    <section id="notes" class="notes">
+        <div class="container">
+            <h2 class="section-title">注意事项</h2>
+            <div class="note-item">
+                <div class="note-icon">🔑</div>
+                <div class="note-content">
+                    <h4>API 密钥配置</h4>
+                    <p>使用前需要在 .env 文件中配置 GLM_API_KEY，确保有足够的 API 配额。</p>
+                </div>
+            </div>
+            <div class="note-item">
+                <div class="note-icon">⚠️</div>
+                <div class="note-content">
+                    <h4>危险操作确认</h4>
+                    <p>delete_file、write_file、run_shell 等危险工具需要用户确认，支持批量确认模式。</p>
+                </div>
+            </div>
+            <div class="note-item">
+                <div class="note-icon">📏</div>
+                <div class="note-content">
+                    <h4>上下文长度限制</h4>
+                    <p>启用上下文压缩功能，当对话历史过长时自动压缩，避免超出 Token 限制。</p>
+                </div>
+            </div>
+            <div class="note-item">
+                <div class="note-icon">🔄</div>
+                <div class="note-content">
+                    <h4>循环检测机制</h4>
+                    <p>内置循环检测器，当 Agent 陷入循环时自动中断，避免无限执行。</p>
+                </div>
+            </div>
+            <div class="note-item">
+                <div class="note-icon">📊</div>
+                <div class="note-content">
+                    <h4>日志与监控</h4>
+                    <p>完整的日志系统，支持 Trace 轨迹回放和 Metrics 统计，便于调试和优化。</p>
+                </div>
+            </div>
+            <div class="note-item">
+                <div class="note-icon">🐍</div>
+                <div class="note-content">
+                    <h4>Python 版本要求</h4>
+                    <p>需要 Python 3.10 或更高版本，建议使用 conda 或 venv 管理虚拟环境。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tech Stack -->
+    <section id="tech-stack">
+        <div class="container">
+            <h2 class="section-title">技术栈</h2>
+            <div class="tech-stack">
+                <div class="tech-item">Python 3.10+</div>
+                <div class="tech-item">GLM-4 API</div>
+                <div class="tech-item">Pydantic 2.x</div>
+                <div class="tech-item">Rich</div>
+                <div class="tech-item">prompt-toolkit</div>
+                <div class="tech-item">python-dotenv</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p>CodeMate AI v0.3.0 | 基于 Function Calling 范式的智能代码分析助手</p>
+            <p style="margin-top: 0.5rem; font-size: 0.875rem;">使用智谱 AI GLM-4 模型构建</p>
+        </div>
+    </footer>
+</body>
+</html>

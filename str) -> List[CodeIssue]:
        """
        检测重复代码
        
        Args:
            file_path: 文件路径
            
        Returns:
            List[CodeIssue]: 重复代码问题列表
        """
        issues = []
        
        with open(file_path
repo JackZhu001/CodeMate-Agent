@@ -1,7 +1,0 @@
-"""
-代码异味检测模块
-负责检测重复代码和各类代码异味
-"""
-
-import ast
-from typing import List

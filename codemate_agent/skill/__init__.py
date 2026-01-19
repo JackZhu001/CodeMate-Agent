@@ -170,37 +170,105 @@ class SkillManager:
         """检查 skill 是否存在"""
         return name in self._index
     
+    def get_description(self, name: str) -> str:
+        """获取 skill 的 description"""
+        return self._index.get(name, "")
+    
     def get_system_prompt_addition(self) -> str:
         """
         返回注入 system prompt 的内容
-        包含 skill 描述和触发条件，让 LLM 自动判断何时使用
+        
+        只注入元数据（name + description），完整内容通过 skill 工具按需加载
+        这是渐进式披露的第一层
         """
         if not self._index:
             return ""
         
         lines = [
             "",
-            "## 可用 Skills",
+            "## 可用 Skills（渐进式加载）",
             "",
-            "Skills 是预定义的专业任务流程。当用户请求匹配下述触发条件时，",
-            "你应该自动使用对应的 Skill 来处理任务。",
+            "以下 Skills 可通过 `skill` 工具按需加载完整内容。",
+            "当用户请求匹配某个 Skill 的描述时，先调用 `skill` 工具加载它。",
             "",
+            "| Skill 名称 | 描述 |",
+            "|-----------|------|",
         ]
         
         for name, desc in self._index.items():
-            lines.append(f"### {name}")
-            lines.append(desc)
-            lines.append("")
+            # 截断过长的描述
+            short_desc = desc[:100] + "..." if len(desc) > 100 else desc
+            # 移除换行符
+            short_desc = short_desc.replace("\n", " ")
+            lines.append(f"| `{name}` | {short_desc} |")
         
         lines.extend([
-            "---",
             "",
-            "**使用方式**: 当检测到用户意图匹配某个 Skill 时，",
-            "在回复开头声明 `[使用 Skill: <skill-name>]`，然后严格按照 Skill 的步骤执行。",
+            "**使用方式**: 调用 `skill` 工具，传入 skill 名称，获取完整指令后执行。",
             "",
         ])
         
         return "\n".join(lines)
+    
+    def match_skill_by_keywords(self, user_input: str) -> Optional[str]:
+        """
+        基于用户输入关键词自动匹配 Skill
+        
+        Args:
+            user_input: 用户输入文本
+            
+        Returns:
+            匹配到的 skill 名称，或 None
+        """
+        user_input_lower = user_input.lower()
+        
+        # 定义关键词映射（优先级从高到低）
+        keyword_rules = [
+            # ui-ux-pro-max 触发词
+            {
+                "skill": "ui-ux-pro-max",
+                "keywords": [
+                    # 明确提及 UI/UX
+                    "ui", "ux", "ui/ux", "界面", "用户体验",
+                    # 设计相关
+                    "设计", "design", "样式", "style", "风格",
+                    # 网页相关
+                    "网页", "webpage", "html", "css", "landing",
+                    "dashboard", "仪表盘", "落地页",
+                    # 视觉相关
+                    "配色", "color", "palette", "字体", "font",
+                    "typography", "排版", "布局", "layout",
+                    # 组件相关
+                    "button", "modal", "navbar", "sidebar", "card",
+                    # 风格关键词
+                    "glassmorphism", "minimalism", "dark mode",
+                    "响应式", "responsive", "美化", "美观",
+                ],
+                "negative": ["code review", "代码审查"],  # 排除词
+            },
+            # code-review 触发词
+            {
+                "skill": "code-review",
+                "keywords": [
+                    "code review", "代码审查", "审查代码", "review代码",
+                    "检查代码", "代码质量", "代码问题", "安全审查",
+                    "找漏洞", "漏洞", "安全检查", "review 一下",
+                ],
+                "negative": [],
+            },
+        ]
+        
+        for rule in keyword_rules:
+            # 检查排除词
+            if any(neg in user_input_lower for neg in rule["negative"]):
+                continue
+            
+            # 检查触发词
+            for keyword in rule["keywords"]:
+                if keyword in user_input_lower:
+                    return rule["skill"]
+        
+        return None
     
     # ==================== 完整层 ====================
     
@@ -236,7 +304,7 @@ class SkillManager:
     
     def prepare_execution(self, name: str, arguments: str = "") -> Optional[str]:
         """
-        准备执行 skill，返回注入的 prompt
+        准备执行 skill，返回完整的 prompt
         
         Args:
             name: skill 名称

@@ -11,6 +11,7 @@ from typing import Optional, List
 
 from ..schema import Message
 from ..logging import setup_logger
+from ..tools.todo.todo_write import TodoWriteTool
 
 
 # 默认配置
@@ -263,6 +264,15 @@ class ContextCompressor:
             self.logger.info(f"已压缩 {len(compress_rounds)} 轮对话为摘要")
         else:
             self.logger.info(f"已压缩 {len(compress_rounds)} 轮对话（未生成摘要）")
+
+        # 注入当前 TODO 状态（如果有）
+        todo_state = TodoWriteTool.get_current_state()
+        if todo_state:
+            result.append(Message(
+                role="system",
+                content=f"[当前任务进度]\n{todo_state['formatted']}"
+            ))
+            self.logger.info("已注入当前 TODO 状态到压缩上下文")
 
         # 记录压缩历史（无论是否生成摘要）
         self._record_compression(

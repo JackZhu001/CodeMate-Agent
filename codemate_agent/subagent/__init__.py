@@ -1,10 +1,11 @@
 """
-子代理模块
+子代理模块（向后兼容）
 
-提供任务委托和子代理执行功能。
+已移动到 codemate_agent.tools.task，这里保留导出以保持兼容性。
 """
 
-from .subagent import (
+# 从新位置导入
+from codemate_agent.tools.task import (
     TaskTool,
     SubagentRunner,
     SubagentResult,
