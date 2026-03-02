@@ -45,8 +45,10 @@ def handle_command(
     # 命令路由
     handlers = {
         "/help": lambda: print_help(),
+        "/init": lambda: _handle_init(agent, memory_manager),
         "/reset": lambda: _handle_reset(agent),
         "/compact": lambda: _handle_compact(agent),
+        "/heartbeat": lambda: _handle_heartbeat(agent),
         "/stats": lambda: _handle_stats(agent),
         "/tools": lambda: _handle_tools(agent),
         "/skills": lambda: _handle_skills(agent),
@@ -73,6 +75,19 @@ def _handle_reset(agent: "CodeMateAgent") -> None:
     print_success("✓ Agent 状态已重置")
 
 
+def _handle_init(agent: "CodeMateAgent", memory_manager: "MemoryManager | None") -> None:
+    """处理 /init 命令，初始化项目 codemate.md"""
+    if memory_manager is None:
+        print_error("记忆管理器未初始化，无法执行 /init")
+        return
+    workspace_dir = getattr(agent, "workspace_dir", Path.cwd())
+    tool_names = []
+    if getattr(agent, "tool_registry", None):
+        tool_names = agent.tool_registry.list_tools()
+    path = memory_manager.init_codemate_file(workspace_dir, tools=tool_names)
+    print_success(f"✓ 初始化完成: {path}")
+
+
 def _handle_compact(agent: "CodeMateAgent") -> None:
     """处理 /compact 命令"""
     if not getattr(agent, "compression_enabled", False) or not getattr(agent, "compressor", None):
@@ -83,6 +98,22 @@ def _handle_compact(agent: "CodeMateAgent") -> None:
     from codemate_agent.tools.compact import CompactTool
     CompactTool._messages_ref = agent.messages
     print_success(f"✓ 上下文压缩完成: {original_count} → {len(agent.messages)} 条消息")
+
+
+def _handle_heartbeat(agent: "CodeMateAgent") -> None:
+    """处理 /heartbeat 命令"""
+    status = agent.get_heartbeat_status()
+    state = "告警" if status.get("stalled") else "正常"
+    console.print(
+        "[cyan]心跳状态:[/cyan]\n"
+        f"  session: {status.get('session_id')}\n"
+        f"  phase: {status.get('phase')}\n"
+        f"  beats: {status.get('beats')}\n"
+        f"  last_tool: {status.get('last_tool')}\n"
+        f"  age_seconds: {status.get('age_seconds')}\n"
+        f"  timeout_seconds: {status.get('timeout_seconds')}\n"
+        f"  status: {state}\n"
+    )
 
 
 def _handle_stats(agent: "CodeMateAgent") -> None:

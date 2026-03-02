@@ -16,6 +16,7 @@ Agent 实现
 """
 
 import json
+import os
 import uuid
 import time
 from typing import List, Optional, Callable
@@ -196,6 +197,24 @@ class CodeMateAgent:
         self.round_count = 0      # 当前对话轮数
         self.total_tokens = 0     # 累计消耗的 token 数
 
+        # 心跳监控
+        self.heartbeat_enabled = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
+        self.heartbeat_timeout_seconds = int(os.getenv("HEARTBEAT_TIMEOUT_SECONDS", "45"))
+        session_id = getattr(self.trace_logger, "session_id", f"local-{uuid.uuid4().hex[:8]}")
+        heartbeat_dir = Path(os.getenv("HEARTBEAT_DIR", "logs/sessions"))
+        heartbeat_dir.mkdir(parents=True, exist_ok=True)
+        self._heartbeat_file = heartbeat_dir / f"heartbeat-{session_id}.jsonl"
+        self._heartbeat_state = {
+            "session_id": session_id,
+            "phase": "idle",
+            "last_beat_ts": time.time(),
+            "last_tool": "",
+            "beats": 0,
+            "stalled": False,
+            "last_alert": "",
+        }
+        self._emit_heartbeat("idle", source="init")
+
     def run(self, query: str) -> str:
         """
         运行 Agent - 这是核心方法
@@ -225,12 +244,17 @@ class CodeMateAgent:
                 # skill 命令已处理，将 skill prompt 注入后继续执行
                 query = skill_result
 
+        # 每轮根据当前 query 刷新 system prompt（包含关键词召回记忆 + codemate.md）
+        if self.messages and self.messages[0].role == "system":
+            self.messages[0] = Message(role="system", content=self._get_system_prompt(query))
+
         # 注意: 渐进式 Skill 加载
         # 不再自动注入完整 Skill 内容，而是让 LLM 通过 skill 工具按需加载
         # 系统提示词中只包含 Skill 索引（name + description）
 
         # 记录用户输入
         self.logger.info(f"用户输入: {query[:100]}...")
+        self._emit_heartbeat("run_started", source="run", query_len=len(query))
         if self.trace_logger:
             self.trace_logger.log_event(
                 TraceEventType.USER_INPUT,
@@ -350,6 +374,7 @@ class CodeMateAgent:
                 "round": self.round_count,
                 "max_rounds": self.max_rounds,
             })
+            self._emit_heartbeat("round_start", source="loop", round=self.round_count)
 
             # ========== Todo Nag Reminder ==========
             # 如果多轮未更新 todo，注入提醒
@@ -375,6 +400,7 @@ class CodeMateAgent:
             # - messages: 完整的对话历史
             # - tools: 可用工具列表（OpenAI Function Calling 格式）
             start_time = time.time()
+            self._emit_heartbeat("llm_request", source="llm", round=self.round_count)
 
             # 记录 LLM 请求
             if self.trace_logger:
@@ -394,6 +420,8 @@ class CodeMateAgent:
             )
 
             duration_ms = (time.time() - start_time) * 1000
+            self._emit_heartbeat("llm_response", source="llm", duration_ms=round(duration_ms, 2))
+            self._check_heartbeat_timeout("llm", duration_ms)
 
             # 更新 token 统计（用于成本控制）
             if response.usage:
@@ -541,8 +569,18 @@ class CodeMateAgent:
                         "tool": tool_name,
                         "args": self._format_args_for_display(arguments),
                     })
+                    self._emit_heartbeat("tool_call_start", source="tool", tool=tool_name)
 
+                    tool_start = time.time()
                     result = self._execute_tool_call(tool_call)
+                    tool_duration_ms = (time.time() - tool_start) * 1000
+                    self._emit_heartbeat(
+                        "tool_call_end",
+                        source="tool",
+                        tool=tool_name,
+                        duration_ms=round(tool_duration_ms, 2),
+                    )
+                    self._check_heartbeat_timeout(f"tool:{tool_name}", tool_duration_ms)
 
                     # ========== 更新 todo 进度跟踪 ==========
                     if tool_name == "todo_write":
@@ -596,6 +634,7 @@ class CodeMateAgent:
             else:
                 # 没有工具调用，说明 LLM 已经给出最终答案
                 self.logger.info(f"任务完成，共 {self.round_count} 轮")
+                self._emit_heartbeat("completed", source="run", total_rounds=self.round_count)
 
                 # 保存助手回答到持久化存储
                 if self.session_storage:
@@ -630,6 +669,7 @@ class CodeMateAgent:
                 {"message": f"达到最大轮数 ({self.max_rounds})，任务未完成"},
                 step=self.round_count,
             )
+        self._emit_heartbeat("max_rounds", source="run", total_rounds=self.round_count)
         return f"已达到最大轮数 ({self.max_rounds})，无法完成任务。"
 
     def _execute_tool_call(self, tool_call: ToolCall) -> str:
@@ -769,7 +809,7 @@ class CodeMateAgent:
 
             return error_msg
 
-    def _get_system_prompt(self) -> str:
+    def _get_system_prompt(self, query: str = "") -> str:
         """
         获取完整的系统提示词
 
@@ -786,9 +826,13 @@ class CodeMateAgent:
 
         # 添加长期记忆
         if self.memory_manager:
-            memory = self.memory_manager.load_all_memory()
+            memory = self.memory_manager.retrieve_relevant_memory(query, top_k=3)
             if memory.strip() and not memory.startswith("# 长期记忆\n\n暂无"):
                 prompt_parts.append(f"\n## 长期记忆\n{memory}")
+
+            codemate_context = self.memory_manager.load_codemate_file(self.workspace_dir)
+            if codemate_context.strip():
+                prompt_parts.append(f"\n## 项目记忆（codemate.md）\n{codemate_context[:5000]}")
 
         # 添加可用 Skills（只是索引，很轻量）
         skills_hint = self.skill_manager.get_system_prompt_addition()
@@ -918,6 +962,14 @@ class CodeMateAgent:
             "message_count": len(self.messages),      # 消息总数
         }
 
+    def get_heartbeat_status(self) -> dict:
+        """获取心跳状态"""
+        state = self._heartbeat_state.copy()
+        state["age_seconds"] = round(time.time() - state["last_beat_ts"], 2)
+        state["timeout_seconds"] = self.heartbeat_timeout_seconds
+        state["enabled"] = self.heartbeat_enabled
+        return state
+
     def load_session(self, messages: list[dict]) -> None:
         """
         加载历史会话消息
@@ -968,6 +1020,63 @@ class CodeMateAgent:
             except Exception as e:
                 # 回调异常不应影响主流程
                 self.logger.debug(f"进度回调异常: {e}")
+
+    def _emit_heartbeat(self, phase: str, source: str = "", **extra) -> None:
+        """记录并发射心跳事件"""
+        if not self.heartbeat_enabled:
+            return
+        now = time.time()
+        self._heartbeat_state["phase"] = phase
+        self._heartbeat_state["last_beat_ts"] = now
+        self._heartbeat_state["beats"] += 1
+        self._heartbeat_state["last_tool"] = extra.get("tool", self._heartbeat_state["last_tool"])
+        self._heartbeat_state["stalled"] = extra.get("stalled", self._heartbeat_state["stalled"])
+        if extra.get("alert"):
+            self._heartbeat_state["last_alert"] = extra.get("message", "")
+
+        payload = {
+            "ts": now,
+            "session_id": self._heartbeat_state["session_id"],
+            "phase": phase,
+            "source": source,
+            "round": self.round_count,
+            "message_count": len(self.messages),
+            "total_tokens": self.total_tokens,
+            "last_tool": self._heartbeat_state["last_tool"],
+            "stalled": self._heartbeat_state["stalled"],
+            **extra,
+        }
+
+        try:
+            with open(self._heartbeat_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            self.logger.debug(f"写入心跳日志失败: {e}")
+
+        self._emit_progress("heartbeat", payload)
+
+    def _check_heartbeat_timeout(self, operation: str, duration_ms: float) -> None:
+        """超时检测，触发心跳告警"""
+        if not self.heartbeat_enabled:
+            return
+        timeout_ms = self.heartbeat_timeout_seconds * 1000
+        if duration_ms <= timeout_ms:
+            return
+        message = (
+            f"心跳告警: {operation} 执行耗时 {duration_ms/1000:.2f}s，"
+            f"超过阈值 {self.heartbeat_timeout_seconds}s"
+        )
+        self.logger.warning(message)
+        self._emit_heartbeat(
+            "watchdog_alert",
+            source="watchdog",
+            alert=True,
+            stalled=True,
+            operation=operation,
+            duration_ms=round(duration_ms, 2),
+            message=message,
+        )
+        self._emit_progress("heartbeat_alert", {"operation": operation, "duration_ms": round(duration_ms, 2)})
 
     def _format_args_for_display(self, arguments: dict) -> str:
         """

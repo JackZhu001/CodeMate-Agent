@@ -6,6 +6,8 @@
 
 from pathlib import Path
 from typing import Optional
+import math
+import re
 
 
 class MemoryManager:
@@ -20,6 +22,7 @@ class MemoryManager:
     PROJECT_CONTEXT = "project_context.md"
     CODE_SNIPPETS = "code_snippets.md"
     CUSTOM_MEMORY = "custom_memory.md"
+    CODEMATE_FILE = "codemate.md"
 
     def __init__(self, memory_dir: Path):
         """
@@ -230,6 +233,155 @@ src/
             return "\n\n---\n\n".join(parts)
 
         return "# 长期记忆\n\n暂无记忆内容。"
+
+    def retrieve_relevant_memory(self, query: str, top_k: int = 3) -> str:
+        """
+        基于 BM25 进行关键词检索，返回最相关的长期记忆片段。
+
+        说明：
+            - BM25 不需要向量库
+            - 适合先做轻量关键词召回，再按需扩展到向量检索
+        """
+        query = (query or "").strip()
+        if not query:
+            return self.load_all_memory()
+
+        documents = self._build_memory_documents()
+        if not documents:
+            return "# 长期记忆\n\n暂无可检索内容。"
+
+        query_tokens = self._tokenize(query)
+        if not query_tokens:
+            return self.load_all_memory()
+
+        scored = self._bm25_rank(documents, query_tokens)
+        top_docs = [doc for doc, score in scored[:top_k] if score > 0]
+        if not top_docs:
+            return self.load_all_memory()
+
+        parts = []
+        for doc in top_docs:
+            snippet = doc["content"][:800]
+            parts.append(f"### {doc['title']} ({doc['source']})\n{snippet}")
+        return "# 长期记忆（关键词召回）\n\n" + "\n\n---\n\n".join(parts)
+
+    def load_codemate_file(self, workspace_dir: Path) -> str:
+        """加载项目 codemate.md（若存在）"""
+        path = Path(workspace_dir) / self.CODEMATE_FILE
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        return ""
+
+    def init_codemate_file(self, workspace_dir: Path, tools: Optional[list[str]] = None) -> Path:
+        """初始化 codemate.md（若不存在）"""
+        path = Path(workspace_dir) / self.CODEMATE_FILE
+        if path.exists():
+            return path
+
+        tools = tools or []
+        tools_text = ", ".join(tools[:20]) if tools else "（待补充）"
+        template = f"""# CodeMate 项目记忆
+
+> 这个文件会在每轮对话中注入上下文，可手动维护项目事实、偏好、约束。
+
+## 项目功能摘要
+- 这是一个 AI Agent 项目，支持多轮工具调用与上下文压缩。
+- 当前目标：持续提升稳定性、可观测性、记忆召回质量。
+
+## 项目特点
+- 工具驱动执行（Function Calling）
+- 长短期记忆管理
+- 上下文压缩与会话持久化
+
+## 可用工具（自动生成）
+- {tools_text}
+
+## 用户画像与偏好（请按需补充）
+- 沟通风格：
+- 代码风格：
+- 约束偏好：
+
+## 关键约定（请按需补充）
+- 
+"""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(template)
+        return path
+
+    def _build_memory_documents(self) -> list[dict]:
+        """将长期记忆文件拆分为可检索文档片段"""
+        docs = []
+        files = [
+            self.USER_PREFERENCES,
+            self.PROJECT_CONTEXT,
+            self.CODE_SNIPPETS,
+            self.CUSTOM_MEMORY,
+        ]
+        for filename in files:
+            path = self.memory_dir / filename
+            if not path.exists():
+                continue
+            content = path.read_text(encoding="utf-8").strip()
+            if not content:
+                continue
+            sections = re.split(r"(?m)^##\s+", content)
+            if len(sections) <= 1:
+                docs.append({
+                    "source": filename,
+                    "title": filename,
+                    "content": content,
+                    "tokens": self._tokenize(content),
+                })
+                continue
+            for sec in sections:
+                sec = sec.strip()
+                if not sec:
+                    continue
+                lines = sec.splitlines()
+                title = lines[0].strip("# ").strip() if lines else filename
+                body = "\n".join(lines[1:]).strip()
+                text = body or sec
+                docs.append({
+                    "source": filename,
+                    "title": title,
+                    "content": text,
+                    "tokens": self._tokenize(text),
+                })
+        return docs
+
+    def _tokenize(self, text: str) -> list[str]:
+        return re.findall(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+", text.lower())
+
+    def _bm25_rank(self, docs: list[dict], query_tokens: list[str]) -> list[tuple[dict, float]]:
+        k1 = 1.5
+        b = 0.75
+        n_docs = len(docs)
+        avg_len = sum(len(d["tokens"]) for d in docs) / max(n_docs, 1)
+
+        df = {}
+        for d in docs:
+            for t in set(d["tokens"]):
+                df[t] = df.get(t, 0) + 1
+
+        scored = []
+        for d in docs:
+            tf = {}
+            for t in d["tokens"]:
+                tf[t] = tf.get(t, 0) + 1
+            dl = len(d["tokens"]) or 1
+            score = 0.0
+            for q in query_tokens:
+                if q not in tf:
+                    continue
+                n_q = df.get(q, 0)
+                idf = math.log(1 + (n_docs - n_q + 0.5) / (n_q + 0.5))
+                freq = tf[q]
+                denom = freq + k1 * (1 - b + b * dl / max(avg_len, 1))
+                score += idf * (freq * (k1 + 1)) / denom
+            scored.append((d, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored
 
     def get_memory_files_info(self) -> dict[str, dict]:
         """

@@ -37,8 +37,10 @@ def print_help() -> None:
 可用命令:
 
   [cyan]/help[/cyan]       - 显示此帮助信息
+  [cyan]/init[/cyan]       - 初始化项目 codemate.md 记忆文件
   [cyan]/reset[/cyan]      - 重置 Agent 状态
   [cyan]/compact[/cyan]    - 手动压缩当前上下文
+  [cyan]/heartbeat[/cyan]  - 查看心跳与看门狗状态
   [cyan]/stats[/cyan]      - 显示统计信息
   [cyan]/tools[/cyan]      - 列出可用工具
   [cyan]/skills[/cyan]     - 列出可用 Skills
