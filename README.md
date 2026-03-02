@@ -153,6 +153,9 @@ python -m pytest -q
 
 特别感谢 **HelloAgents（Datawhale）** 社区教程的启发。  
 本项目最初的 Agent 学习路径和实践方法，受到了其公开内容的直接帮助。
+同时也感谢我在实现过程中借鉴过的工程思路：**Koder** 与 **OpenCode**。
+
+@Datawhale @HelloAgents @Koder @OpenCode
 
 ---
 
