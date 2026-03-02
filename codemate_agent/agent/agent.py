@@ -21,7 +21,7 @@ import time
 from typing import List, Optional, Callable
 from pathlib import Path
 
-from codemate_agent.llm.client import GLMClient
+from codemate_agent.llm.client import LLMClient as GLMClient
 from codemate_agent.schema import Message, LLMResponse, ToolCall
 from codemate_agent.tools.base import Tool
 from codemate_agent.tools.registry import ToolRegistry
@@ -59,7 +59,7 @@ class CodeMateAgent:
 
     def __init__(
         self,
-        llm_client: GLMClient,
+        llm_client: "GLMClient",
         tools: List[Tool],
         max_rounds: int = 50,
         workspace_dir: str = ".",
@@ -73,7 +73,7 @@ class CodeMateAgent:
         planning_enabled: bool = True,
         plan_display_callback: Optional[Callable[[str], None]] = None,
         progress_callback: Optional[Callable[[str, dict], None]] = None,
-        light_llm_client: Optional[GLMClient] = None,
+        light_llm_client: Optional["GLMClient"] = None,
     ):
         """
         初始化 Agent
@@ -138,9 +138,11 @@ class CodeMateAgent:
         self._consecutive_failures = 0
         self._max_consecutive_failures = 3
 
-        # todo 进度跟踪
+        # todo 进度跟踪 + nag reminder
         self._todo_all_completed = False  # 所有 todo 是否完成
         self._last_completed_count = 0  # 最近一次完成的任务数
+        self._rounds_since_todo = 0  # 距离上次更新 todo 的轮数
+        self._max_rounds_without_todo = 3  # 超过此轮数未更新 todo 则 nag
 
         # 工具注册：将所有工具注册到注册器中
         # 这样可以通过工具名称快速查找和执行工具
@@ -178,6 +180,17 @@ class CodeMateAgent:
         self.messages: List[Message] = [
             Message(role="system", content=self._get_system_prompt())
         ]
+
+        # Compact 工具：手动触发对话压缩
+        # 需要注入依赖（compressor 和 messages 引用）
+        from codemate_agent.tools.compact import CompactTool
+        self.compact_tool = CompactTool()
+        CompactTool.set_dependencies(
+            compressor=self.compressor if self.compression_enabled else None,
+            messages=self.messages,
+        )
+        # 注册 Compact 工具
+        self.tool_registry.register(self.compact_tool)
 
         # 统计信息
         self.round_count = 0      # 当前对话轮数
@@ -231,7 +244,30 @@ class CodeMateAgent:
         if self.session_storage:
             self.session_storage.add_user_message(query)
 
-        # 步骤 0: 检查是否需要压缩上下文
+        # ========== 三层上下文压缩 ==========
+
+        # Layer 1: Micro Compact - 每轮自动压缩旧的 tool_result
+        if self.compression_enabled and self.compressor:
+            self.messages = self.compressor.micro_compact(self.messages)
+
+        # Layer 2: Auto Compact - token 超阈值时触发
+        if self.compression_enabled and self.compressor:
+            estimated_tokens = self.compressor.estimate_tokens(self.messages)
+            if estimated_tokens > self.compressor.auto_compact_threshold():
+                self.logger.info(f"[auto_compact] token 超阈值 ({estimated_tokens})，正在压缩...")
+                old_count = len(self.messages)
+                self.messages = self.compressor.auto_compact(self.messages)
+                from codemate_agent.tools.compact import CompactTool
+                CompactTool._messages_ref = self.messages
+                self.logger.info(f"[auto_compact] 完成: {old_count} -> {len(self.messages)} 条消息")
+
+                if self.trace_logger:
+                    self.trace_logger.log_event(
+                        TraceEventType.INFO,
+                        {"event": "auto_compact", "before": old_count, "after": len(self.messages)},
+                    )
+
+        # Layer 3: 原有压缩（用于增量压缩）
         if self.compression_enabled and self.compressor:
             if self.compressor.should_compress(
                 self.messages,
@@ -302,11 +338,29 @@ class CodeMateAgent:
             if self.metrics:
                 self.metrics.record_round()
 
+            # ========== Layer 1: Micro Compact (每轮执行) ==========
+            if self.compression_enabled and self.compressor:
+                self.messages = self.compressor.micro_compact(self.messages)
+                # 更新 CompactTool 的 messages 引用
+                from codemate_agent.tools.compact import CompactTool
+                CompactTool._messages_ref = self.messages
+
             # 触发轮次开始事件
             self._emit_progress("round_start", {
                 "round": self.round_count,
                 "max_rounds": self.max_rounds,
             })
+
+            # ========== Todo Nag Reminder ==========
+            # 如果多轮未更新 todo，注入提醒
+            if self._rounds_since_todo >= self._max_rounds_without_todo:
+                self.logger.info(f"[nag] 超过 {self._rounds_since_todo} 轮未更新 todo，注入提醒")
+                self.messages.append(Message(
+                    role="system",
+                    content="<reminder>请更新你的任务进度。使用 todo_write 工具记录当前进度。</reminder>"
+                ))
+                # 重置计数器，避免连续提醒
+                self._rounds_since_todo = 0
 
             # 检查 todo 是否全部完成，如果是则添加提示
             if self._todo_all_completed and not hasattr(self, '_completion_hint_sent'):
@@ -490,10 +544,19 @@ class CodeMateAgent:
 
                     result = self._execute_tool_call(tool_call)
 
-                    # 检查 todo 完成状态
-                    if tool_name == "todo_write" and self._check_todo_completion(result):
-                        self._todo_all_completed = True
-                        self.logger.info("检测到所有 todo 任务已完成")
+                    # ========== 更新 todo 进度跟踪 ==========
+                    if tool_name == "todo_write":
+                        # 使用了 todo 工具，重置计数器
+                        self._rounds_since_todo = 0
+                        self.logger.debug(f"使用了 todo_write，重置计数器")
+
+                        # 检查 todo 完成状态
+                        if self._check_todo_completion(result):
+                            self._todo_all_completed = True
+                            self.logger.info("检测到所有 todo 任务已完成")
+                    else:
+                        # 未使用 todo 工具，增加计数器
+                        self._rounds_since_todo += 1
 
                     # 触发工具调用完成事件
                     self._emit_progress("tool_call_end", {

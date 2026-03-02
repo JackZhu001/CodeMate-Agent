@@ -1,203 +1,121 @@
-# CodeMate AI
+# CodeMate Agent
 
-> 基于 **Function Calling** 范式的智能代码分析助手
+> 一个面向真实代码仓库的终端 AI 工程助手：能读、能查、能改、能追踪上下文。
 
-CodeMate AI 是一个使用智谱 AI GLM-4 模型构建的代码分析 Agent。通过原生的 Function Calling API，它能够准确调用工具来理解项目结构、搜索代码并分析文件。
+## Why CodeMate
 
-## 特性
+CodeMate 借鉴了 Claude Code / Codex / Aider 在 GitHub README 的优秀表达方式：  
+- **开门见山**：先说你能解决什么问题  
+- **快速上手**：3 步可跑起来  
+- **可验证能力**：明确核心能力与命令  
 
-- ✅ **原生 Function Calling**: 使用 OpenAI 兼容的 API，无需解析文本
-- ✅ **模块化工具系统**: 工具按类别组织（文件/搜索/Shell）
-- ✅ **Pydantic 数据验证**: 所有数据模型使用 Pydantic 进行验证
-- ✅ **简洁的 CLI**: 基于 Rich 的美观命令行界面
-- ✅ **三层日志架构**:
-  - 运行时日志 (Rich 美化输出)
-  - Trace 轨迹日志 (JSONL + Markdown 双格式)
-  - Metrics 统计 (Token、成本、性能指标)
-- ✅ **Token 统计**: 跟踪 API 使用量和预估成本
+如果你在做复杂仓库开发，CodeMate 的目标是：**降低上下文丢失、减少重复解释、把多轮开发状态稳定带下去**。
 
-## 快速开始
+---
 
-### 1. 安装
+## ✨ Highlights
+
+- **三层上下文工程**：微压缩 / 自动压缩 / 手动 `/compact`
+- **短时记忆可控**：默认保留近 3 轮完整上下文
+- **工具输出微压缩**：旧工具输出可占位替代，支持白名单工具不压缩
+- **会话可追溯**：压缩前 transcript 落盘，可随时回读
+- **长期记忆管理**：支持查看跨会话记忆（`/memory`）
+- **交互式终端 UI**：Rich + prompt-toolkit，支持历史与可视化输出
+
+---
+
+## 🚀 Quick Start
+
+### 1) 安装依赖
 
 ```bash
-# 克隆项目
-git clone <repository-url>
-cd codemate-agent
-
-# 激活 conda 环境
-conda activate codemate
-# 或创建环境: conda create -n codemate python=3.11 -y
-
-# 安装依赖
+git clone https://github.com/JackZhu001/CodeMate-Agent.git
+cd CodeMate-Agent
 pip install -r requirements.txt
 ```
 
-### 2. 配置
+### 2) 配置环境变量
 
-创建 `.env` 文件：
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件，填入你的智谱 API Key：
-
-```
-GLM_API_KEY=your_api_key_here
-GLM_MODEL=glm-4-flash
-MAX_ROUNDS=50
-TEMPERATURE=0.7
-
-# 日志配置
-LOG_LEVEL=INFO
-TRACE_ENABLED=true
-TRACE_DIR=logs/traces
-METRICS_ENABLED=true
-METRICS_DIR=logs/sessions
-```
-
-### 3. 运行
+创建 `.env`（可参考 `.env.example`），至少提供：
 
 ```bash
-# 交互模式
+API_KEY=your_api_key_here
+MODEL=glm-4-flash
+```
+
+### 3) 启动
+
+```bash
 ./run.sh
-
-# 单次查询
-./run.sh "分析 examples/sample_project/"
-
-# 指定模型
-./run.sh --model glm-4-plus "你的问题"
 ```
 
-## 可用工具
+---
 
-| 工具 | 功能 |
-|------|------|
-| `read_file` | 读取文件内容 |
-| `list_dir` | 列出目录内容 |
-| `file_info` | 获取文件信息 |
-| `write_file` | 写入文件 |
-| `search_code` | 搜索代码内容 |
-| `find_definition` | 查找函数/类定义 |
-| `analyze_project` | 分析项目结构 |
+## 🖥️ CLI 体验
 
-## 项目结构
+启动后可用命令：
 
-```
-codemate-agent/
-├── codemate_agent/
-│   ├── agent/           # Agent 实现
-│   ├── llm/             # LLM 客户端
-│   ├── logging/         # 日志系统
-│   │   ├── logger.py    # 基础运行时日志
-│   │   ├── trace_logger.py  # Trace 轨迹日志
-│   │   └── metrics.py   # Metrics 统计
-│   ├── tools/           # 工具系统
-│   │   ├── file/        # 文件工具
-│   │   ├── search/      # 搜索工具
-│   │   └── shell/       # Shell 工具
-│   ├── schema.py        # 数据模型
-│   ├── config.py        # 配置管理
-│   └── cli.py           # CLI 入口
-├── logs/                # 日志输出目录
-│   ├── traces/          # JSONL + MD 轨迹文件
-│   └── sessions/        # Metrics 统计文件
-├── tests/               # 单元测试
-├── examples/            # 示例项目
-├── PROJECT_REPORT.md    # 开发报告
-└── README.md
-```
+- `/help` 查看帮助
+- `/reset` 重置会话状态
+- `/compact` 手动压缩当前上下文
+- `/stats` 查看统计
+- `/tools` 查看工具
+- `/skills` 查看技能
+- `/sessions` 查看历史会话
+- `/history <id>` 加载历史会话
+- `/memory` 查看长期记忆
+- `/save` 保存当前会话
 
-## 使用示例
+---
+
+## 🧠 记忆与上下文（当前实现）
+
+### 1) 短时记忆（会话上下文）
+- 通过消息历史维护当前任务状态
+- 默认保留近 3 轮完整轮次（用户/助手/工具）
+
+### 2) 工作记忆（任务进度）
+- Todo 状态可注入压缩结果，避免丢失关键执行状态
+
+### 3) 长时记忆（跨会话）
+- 历史会话与记忆文件持久化
+- `/memory` 可查看长期记忆内容
+
+---
+
+## ⚙️ 压缩策略（当前实现）
+
+### Micro Compact（每轮）
+- 针对 `role="tool"` 的旧工具输出做占位压缩
+- 默认保留最近 3 轮工具输出
+- 支持白名单（例如 `todo_write`）不压缩
+
+### Auto Compact（超阈值）
+- 默认阈值：`context_window * 0.75`（默认窗口 200k）
+- 行为：保留 `system + 最近 3 轮`，更早历史摘要化
+- 同时落盘 transcript 并在摘要中提示“可回读”
+
+### Manual Compact（手动）
+- 用户可用 `/compact` 随时触发自动压缩逻辑
+
+---
+
+## 📚 详细文档
+
+- [记忆与上下文工程详细说明](docs/memory_context_design.md)
+- [工作流说明](WORKFLOW.md)
+- [项目分析报告](PROJECT_ANALYSIS.md)
+
+---
+
+## 🧪 开发与测试
 
 ```bash
-# 交互模式
-codemate
-
-# 分析项目
-codemate "这个项目是用什么语言写的？"
-
-# 读取文件
-codemate "读取 examples/sample_project/main.py 并总结功能"
-
-# 搜索代码
-codemate "搜索所有包含 'Todo' 的代码"
+python -m pytest -q
 ```
 
-## 日志系统
-
-CodeMate Agent 实现了三层日志架构：
-
-### 1. 运行时日志
-基于 Rich 的彩色终端输出，支持动态日志级别。
-
-### 2. Trace 轨迹日志
-记录完整的 Agent 执行过程，支持会话回放：
-
-```bash
-# 查看 JSONL 格式（便于程序分析）
-cat logs/traces/trace-s-20260116-123456-abcd.jsonl
-
-# 查看 Markdown 格式（便于人工阅读）
-cat logs/traces/trace-s-20260116-123456-abcd.md
-```
-
-### 3. Metrics 统计
-每次会话结束时自动显示：
-
-```
-📊 ──────────────────────────────────────────
-   CodeMate Agent 会话统计
-──────────────────────────────────────────
-  会话 ID     : s-20260116-123456-abcd
-  模型        : glm-4-flash
-  持续时间    : 45.2 秒
-
-  🪙 Token 使用
-     Input   : 3,456
-     Output  : 1,234
-     Total   : 4,690
-
-  💰 预估成本 : ¥0.0234
-
-  🔄 执行统计
-     总轮数     : 5
-     LLM 调用   : 5
-     工具调用   : 8
-       调用详情 :
-         - list_dir: 1
-         - read_file: 5
-         - search_code: 2
-     错误次数   : 0
-──────────────────────────────────────────
-```
-
-## 技术栈
-
-- **Python** 3.10+
-- **GLM-4** API
-- **Pydantic** 2.x
-- **Rich** 终端 UI
-- **prompt-toolkit** 交互式输入
-
-## 开发
-
-```bash
-# 运行测试
-python -m unittest tests.test_logging
-
-# 代码格式化
-black codemate_agent/
-
-# 代码检查
-ruff check codemate_agent/
-```
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
+---
 
 ## 许可证
 
-MIT License
+MIT

@@ -1,12 +1,18 @@
 """
 上下文压缩器
 
-当对话历史过长时，自动压缩旧消息为摘要。
+三层压缩策略：
+1. Micro Compact (micro_compact): 每轮自动替换旧 tool 输出为占位符
+2. Auto Compact (auto_compact): token 超阈值时保存到文件 + LLM 总结
+3. Manual Compact (compact tool): 手动触发压缩
 """
 
+import json
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List
 
 from ..schema import Message
@@ -15,9 +21,12 @@ from ..tools.todo.todo_write import TodoWriteTool
 
 
 # 默认配置
-DEFAULT_CONTEXT_WINDOW = 10000  # GLM-4 上下文窗口
-DEFAULT_COMPRESSION_THRESHOLD = 0.8  # 80% 触发压缩
+DEFAULT_CONTEXT_WINDOW = 200000  # 默认上下文窗口
+DEFAULT_COMPRESSION_THRESHOLD = 0.75  # 75% 触发压缩
 DEFAULT_MIN_RETAIN_ROUNDS = 5  # 最少保留轮次（降低以便更早触发压缩）
+DEFAULT_MICRO_COMPACT_KEEP = 3  # Layer 1: 保留最近 3 轮 tool 输出
+DEFAULT_MICRO_COMPACT_TOOL_WHITELIST = ("todo_write",)
+DEFAULT_TOKEN_THRESHOLD = 50000  # Layer 2: 50k token 触发自动压缩
 
 
 @dataclass
@@ -27,14 +36,26 @@ class CompressionConfig:
     context_window: int = DEFAULT_CONTEXT_WINDOW
     compression_threshold: float = DEFAULT_COMPRESSION_THRESHOLD
     min_retain_rounds: int = DEFAULT_MIN_RETAIN_ROUNDS
+    micro_compact_keep: int = DEFAULT_MICRO_COMPACT_KEEP  # Layer 1 保留轮数
+    micro_compact_tool_whitelist: List[str] = field(default_factory=lambda: list(DEFAULT_MICRO_COMPACT_TOOL_WHITELIST))
+    token_threshold: int = 0  # Layer 2 阈值（<=0 时按 window*threshold 计算）
+    transcript_dir: Optional[str] = None  # 记录保存目录
 
     @classmethod
     def from_env(cls) -> "CompressionConfig":
         """从环境变量加载配置"""
+        raw_whitelist = os.getenv(
+            "MICRO_COMPACT_TOOL_WHITELIST",
+            ",".join(DEFAULT_MICRO_COMPACT_TOOL_WHITELIST),
+        )
         return cls(
             context_window=int(os.getenv("CONTEXT_WINDOW", str(DEFAULT_CONTEXT_WINDOW))),
             compression_threshold=float(os.getenv("COMPRESSION_THRESHOLD", str(DEFAULT_COMPRESSION_THRESHOLD))),
             min_retain_rounds=int(os.getenv("MIN_RETAIN_ROUNDS", str(DEFAULT_MIN_RETAIN_ROUNDS))),
+            micro_compact_keep=int(os.getenv("MICRO_COMPACT_KEEP", str(DEFAULT_MICRO_COMPACT_KEEP))),
+            micro_compact_tool_whitelist=[s.strip() for s in raw_whitelist.split(",") if s.strip()],
+            token_threshold=int(os.getenv("TOKEN_THRESHOLD", "0")),
+            transcript_dir=os.getenv("TRANSCRIPT_DIR", None),
         )
 
 
@@ -99,6 +120,161 @@ class ContextCompressor:
         self.compression_history: List[CompressionRecord] = []
         # 最大历史记录数
         self.max_history_size = 20
+        # 设置 transcript 目录
+        if self.config.transcript_dir:
+            self.transcript_dir = Path(self.config.transcript_dir)
+        else:
+            self.transcript_dir = Path.home() / ".codemate" / "transcripts"
+        self.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # ========== Layer 1: Micro Compact ==========
+
+    def micro_compact(self, messages: List[Message]) -> List[Message]:
+        """
+        Layer 1: 微压缩 - 替换旧的 tool 输出为占位符
+
+        每轮自动调用，将早期轮次的 tool 输出替换为简短占位符，
+        只保留最近 N 轮 tool 输出的完整内容。
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            压缩后的消息列表
+        """
+        keep_rounds = self.config.micro_compact_keep
+        if keep_rounds <= 0:
+            return messages
+
+        system_messages = [m for m in messages if m.role == "system"]
+        non_system_messages = [m for m in messages if m.role != "system"]
+        rounds = self._identify_rounds(non_system_messages)
+        if len(rounds) <= keep_rounds:
+            return messages
+
+        retained_rounds = rounds[-keep_rounds:]
+        retained_tool_ids = {id(msg) for round_msgs in retained_rounds for msg in round_msgs if msg.role == "tool"}
+        whitelist = set(self.config.micro_compact_tool_whitelist)
+        cleared_count = 0
+        for msg in non_system_messages:
+            if msg.role != "tool":
+                continue
+            if id(msg) in retained_tool_ids:
+                continue
+            if msg.name in whitelist:
+                continue
+            if isinstance(msg.content, str) and len(msg.content) > 100:
+                tool_name = msg.name or "unknown"
+                msg.content = f"[工具输出已压缩: {tool_name}] 如需细节请重新读取相关文件/命令输出。"
+                cleared_count += 1
+
+        if cleared_count > 0:
+            self.logger.debug(f"Micro compact: 压缩了 {cleared_count} 条旧 tool 输出")
+
+        return system_messages + non_system_messages
+
+    # ========== Layer 2: Auto Compact ==========
+
+    def estimate_tokens(self, messages: List[Message]) -> int:
+        """估算消息列表的 token 数（约 4 字符 = 1 token）"""
+        return len(str(messages)) // 4
+
+    def auto_compact(self, messages: List[Message]) -> List[Message]:
+        """
+        Layer 2: 自动压缩 - 保存完整记录并生成摘要
+
+        当 token 数超过阈值时触发：
+        1. 保存完整对话到 .transcripts/ 目录
+        2. 调用 LLM 生成摘要
+        3. 用摘要替换整个对话历史
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            压缩后的消息列表
+        """
+        # 保存完整记录
+        transcript_path = self.transcript_dir / f"transcript_{int(time.time())}.jsonl"
+        try:
+            with open(transcript_path, "w") as f:
+                for msg in messages:
+                    # 转换 Message 对象为字典
+                    msg_dict = {
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                    if msg.tool_calls:
+                        msg_dict["tool_calls"] = [
+                            {"id": tc.id, "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                            for tc in msg.tool_calls
+                        ]
+                    if msg.tool_call_id:
+                        msg_dict["tool_call_id"] = msg.tool_call_id
+                    if msg.name:
+                        msg_dict["name"] = msg.name
+                    f.write(json.dumps(msg_dict, default=str) + "\n")
+            self.logger.info(f"[auto_compact] 记录已保存: {transcript_path}")
+        except Exception as e:
+            self.logger.warning(f"[auto_compact] 保存记录失败: {e}")
+            transcript_path = None
+
+        # 分离 system 消息并保留最近 3 轮完整上下文
+        system_messages = [m for m in messages if m.role == "system"]
+        non_system_messages = [m for m in messages if m.role != "system"]
+        rounds = self._identify_rounds(non_system_messages)
+        retain_rounds = min(3, len(rounds))
+        retain_messages = self._rounds_to_messages(rounds[-retain_rounds:]) if retain_rounds > 0 else []
+        history_to_summarize = self._rounds_to_messages(rounds[:-retain_rounds]) if len(rounds) > retain_rounds else []
+
+        # 调用 LLM 生成摘要
+        target_messages = history_to_summarize or non_system_messages
+        conversation_text = json.dumps(
+            [{"role": m.role, "content": m.content[:500] if m.content else ""} for m in target_messages],
+            ensure_ascii=False,
+        )[:80000]
+
+        summary = None
+        if self.llm:
+            try:
+                response = self.llm.complete(
+                    messages=[Message(role="user", content=
+                        "Summarize this conversation for continuity. Include: "
+                        "1) What was accomplished, 2) Current state, 3) Key decisions made. "
+                        "Be concise but preserve critical details.\n\n" + conversation_text)],
+                    tools=None,
+                )
+                summary = response.content.strip() if response.content else None
+            except Exception as e:
+                self.logger.warning(f"[auto_compact] 摘要生成失败: {e}")
+
+        # 重建消息列表（保留 system + 最近 3 轮）
+        result = []
+        result.extend(system_messages)
+        transcript_info = f"记录文件: {transcript_path}" if transcript_path else "记录未保存"
+        if summary:
+            result.append(Message(
+                role="system",
+                content=f"[历史摘要，早期对话已压缩]\n{transcript_info}\n如需细节可重新读取记录文件。\n\n{summary}",
+            ))
+        else:
+            result.append(Message(
+                role="system",
+                content=f"[历史摘要生成失败，早期对话已压缩]\n{transcript_info}\n如需细节可重新读取记录文件。",
+            ))
+
+        result.extend(retain_messages)
+
+        self.logger.info(
+            f"[auto_compact] 压缩完成: {len(messages)} -> {len(result)} 条消息 (保留最近 {retain_rounds} 轮)"
+        )
+        return result
+
+    def auto_compact_threshold(self) -> int:
+        """获取自动压缩触发阈值"""
+        if self.config.token_threshold > 0:
+            return self.config.token_threshold
+        return int(self.config.context_window * self.config.compression_threshold)
 
     def get_compression_history(self) -> List[CompressionRecord]:
         """获取压缩历史记录"""

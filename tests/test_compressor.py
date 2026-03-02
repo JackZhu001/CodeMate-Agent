@@ -179,6 +179,59 @@ def test_compression_config_from_env(monkeypatch):
     assert config.min_retain_rounds == 5
 
 
+def test_micro_compact_keeps_recent_rounds_and_whitelist():
+    """微压缩应保留近三轮，并跳过白名单工具"""
+    messages = [Message(role="system", content="系统提示词")]
+    tools = ["old_tool", "todo_write", "tool_3", "tool_4", "tool_5"]
+
+    for i, tool_name in enumerate(tools, start=1):
+        call_id = f"call_{i}"
+        messages.append(Message(role="user", content=f"用户问题 {i}"))
+        messages.append(Message(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": call_id, "type": "function", "function": {"name": tool_name, "arguments": {}}}],
+        ))
+        messages.append(Message(
+            role="tool",
+            content=("X" * 180) + f"_{tool_name}",
+            tool_call_id=call_id,
+            name=tool_name,
+        ))
+
+    compressor = ContextCompressor(
+        config=CompressionConfig(
+            micro_compact_keep=3,
+            micro_compact_tool_whitelist=["todo_write"],
+        )
+    )
+    result = compressor.micro_compact(messages)
+
+    compressed_first = next(m for m in result if m.role == "tool" and m.name == "old_tool")
+    whitelisted_second = next(m for m in result if m.role == "tool" and m.name == "todo_write")
+    recent_last = next(m for m in result if m.role == "tool" and m.name == "tool_5")
+
+    assert "已压缩" in compressed_first.content
+    assert "已压缩" not in whitelisted_second.content
+    assert "已压缩" not in recent_last.content
+
+
+def test_auto_compact_retains_system_and_last_three_rounds():
+    """自动压缩应保留 system 和最近三轮原始消息"""
+    messages = create_mock_rounds(6)
+    compressor = ContextCompressor(config=CompressionConfig())
+
+    result = compressor.auto_compact(messages)
+
+    assert result[0].role == "system"
+    assert any(m.role == "system" and "历史摘要" in m.content for m in result)
+
+    user_msgs = [m for m in result if m.role == "user"]
+    assert len(user_msgs) == 3
+    assert user_msgs[0].content == "用户问题 4"
+    assert user_msgs[2].content == "用户问题 6"
+
+
 if __name__ == "__main__":
     # 快速测试
     test = TestCompressionThreshold()

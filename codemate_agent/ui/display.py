@@ -38,6 +38,7 @@ def print_help() -> None:
 
   [cyan]/help[/cyan]       - 显示此帮助信息
   [cyan]/reset[/cyan]      - 重置 Agent 状态
+  [cyan]/compact[/cyan]    - 手动压缩当前上下文
   [cyan]/stats[/cyan]      - 显示统计信息
   [cyan]/tools[/cyan]      - 列出可用工具
   [cyan]/skills[/cyan]     - 列出可用 Skills

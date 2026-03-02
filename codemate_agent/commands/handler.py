@@ -46,6 +46,7 @@ def handle_command(
     handlers = {
         "/help": lambda: print_help(),
         "/reset": lambda: _handle_reset(agent),
+        "/compact": lambda: _handle_compact(agent),
         "/stats": lambda: _handle_stats(agent),
         "/tools": lambda: _handle_tools(agent),
         "/skills": lambda: _handle_skills(agent),
@@ -70,6 +71,18 @@ def _handle_reset(agent: "CodeMateAgent") -> None:
     """处理 /reset 命令"""
     agent.reset()
     print_success("✓ Agent 状态已重置")
+
+
+def _handle_compact(agent: "CodeMateAgent") -> None:
+    """处理 /compact 命令"""
+    if not getattr(agent, "compression_enabled", False) or not getattr(agent, "compressor", None):
+        print_error("上下文压缩未启用")
+        return
+    original_count = len(agent.messages)
+    agent.messages = agent.compressor.auto_compact(agent.messages)
+    from codemate_agent.tools.compact import CompactTool
+    CompactTool._messages_ref = agent.messages
+    print_success(f"✓ 上下文压缩完成: {original_count} → {len(agent.messages)} 条消息")
 
 
 def _handle_stats(agent: "CodeMateAgent") -> None:
