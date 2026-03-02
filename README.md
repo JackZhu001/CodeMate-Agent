@@ -149,6 +149,13 @@ python -m pytest -q
 
 ---
 
+## 🙏 致谢
+
+特别感谢 **HelloAgents（Datawhale）** 社区教程的启发。  
+本项目最初的 Agent 学习路径和实践方法，受到了其公开内容的直接帮助。
+
+---
+
 ## 许可证
 
 MIT
