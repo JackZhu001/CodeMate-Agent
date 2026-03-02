@@ -110,8 +110,11 @@ def _handle_heartbeat(agent: "CodeMateAgent") -> None:
         f"  phase: {status.get('phase')}\n"
         f"  beats: {status.get('beats')}\n"
         f"  last_tool: {status.get('last_tool')}\n"
+        f"  pending_todos: {status.get('pending_todos')}\n"
         f"  age_seconds: {status.get('age_seconds')}\n"
+        f"  idle_seconds: {status.get('idle_seconds')}\n"
         f"  timeout_seconds: {status.get('timeout_seconds')}\n"
+        f"  mode: {status.get('mode')}\n"
         f"  status: {state}\n"
     )
 

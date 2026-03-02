@@ -35,8 +35,11 @@ CodeMate 试图把这条链路打通：
 在一次长任务联调中，我遇到过“终端看起来还在跑，但其实流程已经卡住”的情况。  
 这个痛点让我参考了 OpenClaw 一类 agent 编排思路，给 CodeMate 加入了**心跳 + 看门狗**：
 - 阶段心跳持续上报（round / llm / tool）
+- 后台周期唤醒检查待办（pending / in_progress）
 - 超时自动告警（watchdog）
 - `/heartbeat` 随时查看当前状态
+
+默认采用简化的 **task_polling** 模式（任务驱动轮询），避免过度复杂；如需完整详细打点，可切到 `HEARTBEAT_MODE=verbose`。
 
 目标很直接：让 Agent 不再“静默失败”，而是可观测、可定位、可恢复。
 

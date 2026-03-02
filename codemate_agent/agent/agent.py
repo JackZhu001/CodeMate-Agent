@@ -19,6 +19,7 @@ import json
 import os
 import uuid
 import time
+import threading
 from typing import List, Optional, Callable
 from pathlib import Path
 
@@ -200,6 +201,8 @@ class CodeMateAgent:
         # 心跳监控
         self.heartbeat_enabled = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
         self.heartbeat_timeout_seconds = int(os.getenv("HEARTBEAT_TIMEOUT_SECONDS", "45"))
+        self.heartbeat_mode = os.getenv("HEARTBEAT_MODE", "task_polling")  # task_polling | verbose
+        self.heartbeat_verbose = self.heartbeat_mode == "verbose"
         session_id = getattr(self.trace_logger, "session_id", f"local-{uuid.uuid4().hex[:8]}")
         heartbeat_dir = Path(os.getenv("HEARTBEAT_DIR", "logs/sessions"))
         heartbeat_dir.mkdir(parents=True, exist_ok=True)
@@ -212,8 +215,15 @@ class CodeMateAgent:
             "beats": 0,
             "stalled": False,
             "last_alert": "",
+            "last_todo_check_ts": 0.0,
+            "pending_todos": 0,
         }
+        self._last_activity_ts = time.time()
+        self.heartbeat_poll_seconds = int(os.getenv("HEARTBEAT_POLL_SECONDS", "15"))
+        self._heartbeat_stop_event = threading.Event()
+        self._heartbeat_thread: Optional[threading.Thread] = None
         self._emit_heartbeat("idle", source="init")
+        self._start_heartbeat_worker()
 
     def run(self, query: str) -> str:
         """
@@ -968,6 +978,8 @@ class CodeMateAgent:
         state["age_seconds"] = round(time.time() - state["last_beat_ts"], 2)
         state["timeout_seconds"] = self.heartbeat_timeout_seconds
         state["enabled"] = self.heartbeat_enabled
+        state["mode"] = self.heartbeat_mode
+        state["idle_seconds"] = round(time.time() - self._last_activity_ts, 2)
         return state
 
     def load_session(self, messages: list[dict]) -> None:
@@ -1025,6 +1037,11 @@ class CodeMateAgent:
         """记录并发射心跳事件"""
         if not self.heartbeat_enabled:
             return
+        # 默认简化模式：只保留任务驱动轮询和关键告警事件
+        if (not self.heartbeat_verbose) and source != "worker":
+            key_phases = {"completed", "max_rounds", "watchdog_alert", "todo_nudge"}
+            if phase not in key_phases:
+                return
         now = time.time()
         self._heartbeat_state["phase"] = phase
         self._heartbeat_state["last_beat_ts"] = now
@@ -1046,6 +1063,9 @@ class CodeMateAgent:
             "stalled": self._heartbeat_state["stalled"],
             **extra,
         }
+
+        if source != "worker":
+            self._last_activity_ts = now
 
         try:
             with open(self._heartbeat_file, "a", encoding="utf-8") as f:
@@ -1077,6 +1097,72 @@ class CodeMateAgent:
             message=message,
         )
         self._emit_progress("heartbeat_alert", {"operation": operation, "duration_ms": round(duration_ms, 2)})
+
+    def _start_heartbeat_worker(self) -> None:
+        """启动后台心跳线程：周期性检查待办状态"""
+        if not self.heartbeat_enabled or self.heartbeat_poll_seconds <= 0:
+            return
+
+        def _worker_loop() -> None:
+            while not self._heartbeat_stop_event.is_set():
+                self._heartbeat_stop_event.wait(self.heartbeat_poll_seconds)
+                if self._heartbeat_stop_event.is_set():
+                    break
+                self._heartbeat_pending_check_once()
+
+        self._heartbeat_thread = threading.Thread(
+            target=_worker_loop,
+            name="codemate-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+
+    def _heartbeat_pending_check_once(self) -> None:
+        """
+        周期检查待办事项。
+        心跳不直接修改消息上下文，只做观测和提醒事件发射。
+        """
+        from codemate_agent.tools.todo.todo_write import TodoWriteTool
+
+        todo_state = TodoWriteTool.get_current_state()
+        pending = 0
+        in_progress = 0
+        if todo_state:
+            stats = todo_state.get("stats", {})
+            pending = int(stats.get("pending", 0))
+            in_progress = int(stats.get("in_progress", 0))
+
+        now = time.time()
+        idle_seconds = now - self._last_activity_ts
+        self._heartbeat_state["last_todo_check_ts"] = now
+        self._heartbeat_state["pending_todos"] = pending + in_progress
+
+        self._emit_heartbeat(
+            "heartbeat_tick",
+            source="worker",
+            pending_todos=pending,
+            in_progress_todos=in_progress,
+            idle_seconds=round(idle_seconds, 2),
+        )
+
+        if (pending + in_progress) > 0 and idle_seconds > self.heartbeat_timeout_seconds:
+            message = (
+                f"检测到待办未清空（pending={pending}, in_progress={in_progress}），"
+                f"且空闲 {idle_seconds:.1f}s"
+            )
+            self._emit_heartbeat(
+                "todo_nudge",
+                source="worker",
+                alert=True,
+                message=message,
+                pending_todos=pending,
+                in_progress_todos=in_progress,
+                idle_seconds=round(idle_seconds, 2),
+            )
+            self._emit_progress(
+                "heartbeat_todo_nudge",
+                {"pending": pending, "in_progress": in_progress, "idle_seconds": round(idle_seconds, 2)},
+            )
 
     def _format_args_for_display(self, arguments: dict) -> str:
         """
