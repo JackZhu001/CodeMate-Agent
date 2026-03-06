@@ -1,13 +1,16 @@
 """
 LLM 客户端
 
-支持 GLM API 和原生 Function Calling。
+支持多种 LLM API 提供商：MiniMax、OpenAI、Anthropic 等。
+支持原生 Function Calling。
 """
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional, Generator
 
+import requests
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -18,49 +21,76 @@ from tenacity import (
 from codemate_agent.schema import LLMResponse, Message, ToolCall, TokenUsage
 
 
-class GLMClient:
+class LLMClient:
     """
-    GLM API 客户端
+    通用 LLM API 客户端
 
-    支持通过 OpenAI 兼容的 API 格式调用智谱 AI。
+    支持通过 OpenAI 兼容的 API 格式调用多种 LLM 提供商。
     """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "glm-4.7",
-        base_url: str = "https://open.bigmodel.cn/api/coding/paas/v4/",
+        model: str = "mini-max-chat",
+        base_url: str = "https://api.minimaxi.com/anthropic/v1",
         temperature: float = 0.7,
+        provider: str = "minimax",
     ):
         """
-        初始化 GLM 客户端
+        初始化 LLM 客户端
 
         Args:
-            api_key: GLM API Key
+            api_key: API Key
             model: 模型名称
             base_url: API Base URL
             temperature: 温度参数
+            provider: API 提供商 (minimax, openai, anthropic)
         """
-        self.api_key = api_key or os.getenv("GLM_API_KEY")
+        self.api_key = api_key or os.getenv("API_KEY")
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.temperature = temperature
+        self.provider = provider
 
         if not self.api_key:
-            raise ValueError("GLM API Key 未设置，请设置 GLM_API_KEY 环境变量")
+            raise ValueError("API Key 未设置，请设置 API_KEY 环境变量")
 
-        # 延迟导入 zhipuai
-        try:
-            from zhipuai import ZhipuAI
-            self.client = ZhipuAI(api_key=self.api_key, base_url=self.base_url)
-        except ImportError:
-            raise ImportError("请安装 zhipuai 库: pip install zhipuai")
+        # 根据提供商设置请求头
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        # MiniMax 使用不同的认证方式
+        if provider == "minimax":
+            self.headers["Authorization"] = self.api_key  # MiniMax 直接使用 API Key
+            # 使用 OpenAI 兼容客户端
+            try:
+                from openai import OpenAI
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    max_retries=0,  # 禁用自动重试，使用自定义重试逻辑
+                )
+            except ImportError:
+                raise ImportError("请安装 openai 库: pip install openai")
+        else:
+            # 其他提供商使用 zhipuai 或 OpenAI
+            try:
+                from openai import OpenAI
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            except ImportError:
+                try:
+                    from zhipuai import ZhipuAI
+                    self.client = ZhipuAI(api_key=self.api_key, base_url=self.base_url)
+                except ImportError:
+                    raise ImportError("请安装 openai 或 zhipuai 库")
 
     def complete(
         self,
         messages: List[Message],
         tools: Optional[List[Dict]] = None,
-        max_tokens: int = 8192,  # 🆕 提高到 8K，支持更长的输出
+        max_tokens: int = 4096,  # 降低默认 max_tokens 兼容性
     ) -> LLMResponse:
         """
         完成对话（支持原生 Function Calling）
@@ -95,7 +125,48 @@ class GLMClient:
             return self._parse_response(response)
 
         except Exception as e:
-            raise RuntimeError(f"GLM API 调用失败: {e}") from e
+            # 如果是 function calling 不支持的错误，尝试不带 tools 重试
+            error_str = str(e)
+            if tools and ("invalid chat setting" in error_str or "bad_request_error" in error_str):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Function calling 不被支持 ({self.model})，尝试不带 tools 重试...")
+
+                # 移除 tools 参数重试
+                params_without_tools = params.copy()
+                del params_without_tools["tools"]
+                params_without_tools["messages"] = self._sanitize_messages_for_text_only(api_messages)
+                try:
+                    response = self._call_with_retry(params_without_tools)
+                    return self._parse_response(response)
+                except Exception as retry_err:
+                    retry_error_str = str(retry_err)
+                    if "invalid chat setting" in retry_error_str or "bad_request_error" in retry_error_str:
+                        logger.warning(f"模型参数不兼容 ({self.model})，尝试最小参数重试...")
+                        minimal_params = {
+                            "model": self.model,
+                            "messages": self._sanitize_messages_for_text_only(api_messages),
+                        }
+                        try:
+                            response = self._call_with_retry(minimal_params)
+                            return self._parse_response(response)
+                        except Exception as minimal_err:
+                            minimal_error_str = str(minimal_err)
+                            if "invalid chat setting" in minimal_error_str or "bad_request_error" in minimal_error_str:
+                                logger.warning(f"最小参数仍不兼容 ({self.model})，尝试单轮纯文本重试...")
+                                plain_params = {
+                                    "model": self.model,
+                                    "messages": [{
+                                        "role": "user",
+                                        "content": self._messages_to_single_prompt(api_messages),
+                                    }],
+                                }
+                                response = self._call_with_retry(plain_params)
+                                return self._parse_response(response)
+                            raise
+                    raise
+
+            raise RuntimeError(f"LLM API 调用失败: {e}") from e
 
     def complete_stream(
         self,
@@ -135,7 +206,7 @@ class GLMClient:
                     yield chunk.choices[0].delta.content
 
         except Exception as e:
-            raise RuntimeError(f"GLM API 流式调用失败: {e}") from e
+            raise RuntimeError(f"LLM API 流式调用失败: {e}") from e
 
     def _call_with_retry(self, params: Dict) -> Any:
         """
@@ -180,10 +251,40 @@ class GLMClient:
     def _convert_messages(self, messages: List[Message]) -> List[Dict]:
         """转换消息格式为 API 格式"""
         api_messages = []
+        seen_system = False
+        preserve_tool_call_ids = set()
+        if self.provider == "minimax":
+            preserve_tool_call_ids = self._collect_recent_tool_call_ids(messages, keep_rounds=2)
+
         for msg in messages:
-            api_msg = {"role": msg.role, "content": msg.content}
+            role = msg.role
+            content = msg.content
+
+            # MiniMax-M2 仅允许一个 system 消息；后续 system 需降级为 user
+            if self.provider == "minimax" and role == "system":
+                if not seen_system:
+                    seen_system = True
+                else:
+                    role = "user"
+                    content = f"[System note]\n{content}"
+
+            # MiniMax 对历史 tool_call 协议校验严格，历史对话统一降级为纯文本
+            if self.provider == "minimax" and role == "tool":
+                if msg.tool_call_id not in preserve_tool_call_ids:
+                    role = "assistant"
+                    tool_name = msg.name or "tool"
+                    content = f"[{tool_name} output]\n{content}"
+
+            api_msg = {"role": role, "content": content}
             if msg.tool_calls:
-                api_msg["tool_calls"] = [
+                selected_calls = msg.tool_calls
+                if self.provider == "minimax":
+                    selected_calls = [tc for tc in msg.tool_calls if tc.id in preserve_tool_call_ids]
+                    if not selected_calls and role == "assistant" and not content.strip():
+                        api_msg["content"] = "[Tool call context omitted for compatibility]"
+
+                if selected_calls:
+                    api_msg["tool_calls"] = [
                     {
                         "id": tc.id,
                         "type": tc.type,
@@ -192,14 +293,55 @@ class GLMClient:
                             "arguments": json.dumps(tc.function.arguments)
                         }
                     }
-                    for tc in msg.tool_calls
-                ]
-            if msg.tool_call_id:
+                    for tc in selected_calls
+                    ]
+            if msg.tool_call_id and (self.provider != "minimax" or msg.tool_call_id in preserve_tool_call_ids):
                 api_msg["tool_call_id"] = msg.tool_call_id
-            if msg.name:
+            if msg.name and (self.provider != "minimax" or msg.tool_call_id in preserve_tool_call_ids):
                 api_msg["name"] = msg.name
             api_messages.append(api_msg)
         return api_messages
+
+    def _collect_recent_tool_call_ids(self, messages: List[Message], keep_rounds: int = 2) -> set[str]:
+        """收集最近 N 轮工具调用 ID，用于在 MiniMax 下保留结构化工具历史。"""
+        ids: set[str] = set()
+        rounds = 0
+        for msg in reversed(messages):
+            if msg.role == "assistant" and msg.tool_calls:
+                ids.update(tc.id for tc in msg.tool_calls if tc.id)
+                rounds += 1
+                if rounds >= keep_rounds:
+                    break
+        return ids
+
+    def _sanitize_messages_for_text_only(self, api_messages: List[Dict]) -> List[Dict]:
+        """将含工具语义的消息降级为纯文本对话，兼容不支持 function calling 的模型。"""
+        sanitized: List[Dict] = []
+        for msg in api_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+
+            if role == "tool":
+                tool_name = msg.get("name") or "tool"
+                role = "assistant"
+                content = f"[{tool_name} output]\n{content}"
+            elif role not in {"system", "user", "assistant"}:
+                role = "user"
+
+            sanitized.append({"role": role, "content": content})
+        return sanitized
+
+    def _messages_to_single_prompt(self, api_messages: List[Dict]) -> str:
+        """将多轮消息压成单轮 user 文本，作为最保守兼容兜底。"""
+        parts: List[str] = []
+        for msg in self._sanitize_messages_for_text_only(api_messages):
+            role = msg.get("role", "user").upper()
+            content = msg.get("content", "")
+            parts.append(f"{role}:\n{content}")
+        return "\n\n".join(parts)
 
     def _parse_response(self, response) -> LLMResponse:
         """解析 API 响应"""
@@ -241,6 +383,8 @@ class GLMClient:
                         "arguments": args
                     }
                 ))
+        elif self.provider == "minimax" and isinstance(content, str) and "<invoke" in content:
+            content, tool_calls = self._parse_minimax_tool_calls_from_content(content)
 
         # 解析 token 使用
         usage = None
@@ -254,9 +398,56 @@ class GLMClient:
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
-            finish_reason=choice.finish_reason,
+            finish_reason="tool_calls" if tool_calls else choice.finish_reason,
             usage=usage
         )
+
+    def _parse_minimax_tool_calls_from_content(self, content: str) -> tuple[str, Optional[List[ToolCall]]]:
+        """
+        解析 MiniMax 文本中的 <minimax:tool_call><invoke ...> 协议。
+        """
+        invoke_pattern = re.compile(
+            r'<invoke\s+name="([^"]+)">\s*(.*?)\s*</invoke>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        param_pattern = re.compile(
+            r'<parameter\s+name="([^"]+)">\s*(.*?)\s*</parameter>',
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        tool_calls: List[ToolCall] = []
+        for idx, match in enumerate(invoke_pattern.finditer(content), start=1):
+            tool_name = match.group(1).strip()
+            body = match.group(2)
+            args: Dict[str, Any] = {}
+
+            for p in param_pattern.finditer(body):
+                key = p.group(1).strip()
+                value_raw = p.group(2).strip()
+                value: Any = value_raw
+                if (value_raw.startswith("{") and value_raw.endswith("}")) or (
+                    value_raw.startswith("[") and value_raw.endswith("]")
+                ):
+                    try:
+                        value = json.loads(value_raw)
+                    except json.JSONDecodeError:
+                        value = value_raw
+                args[key] = value
+
+            if tool_name:
+                tool_calls.append(
+                    ToolCall(
+                        id=f"minimax_call_{idx}",
+                        type="function",
+                        function={"name": tool_name, "arguments": args},
+                    )
+                )
+
+        # 清理协议片段，保留纯文本说明
+        cleaned = re.sub(r"<minimax:tool_call>.*?</minimax:tool_call>", "", content, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL | re.IGNORECASE).strip()
+
+        return cleaned, tool_calls or None
 
     def _parse_list_arguments(self, tool_name: str, args_list: list) -> dict:
         """

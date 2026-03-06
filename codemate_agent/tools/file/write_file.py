@@ -4,10 +4,14 @@
 
 from pathlib import Path
 from codemate_agent.tools.base import Tool
+from codemate_agent.tools.utils import safe_path, PathSecurityError
 
 
 class WriteFileTool(Tool):
     """写入文件内容工具（谨慎使用）"""
+
+    def __init__(self, workspace_dir: str = None):
+        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
 
     @property
     def name(self) -> str:
@@ -43,9 +47,11 @@ class WriteFileTool(Tool):
         }
 
     def run(self, file_path: str, content: str, **kwargs) -> str:
-        path = Path(file_path)
-        if not path.is_absolute():
-            path = Path.cwd() / path
+        try:
+            # 使用安全路径检查
+            path = safe_path(file_path, self.workspace_dir)
+        except PathSecurityError as e:
+            return f"错误: {e}"
 
         try:
             # 创建父目录

@@ -43,6 +43,7 @@ class ArgumentValidator:
         "write_file": {
             "required": ["file_path", "content"],
             "min_length": {"file_path": 3},
+            "max_length": {"content": 3000},
         },
         "read_file": {
             "required": ["file_path"],
@@ -50,6 +51,15 @@ class ArgumentValidator:
         },
         "append_file": {
             "required": ["file_path", "content"],
+            "min_length": {"file_path": 3},
+            "max_length": {"content": 3000},
+        },
+        "write_file_chunks": {
+            "required": ["file_path", "chunks"],
+            "min_length": {"file_path": 3},
+        },
+        "append_file_chunks": {
+            "required": ["file_path", "chunks"],
             "min_length": {"file_path": 3},
         },
         "delete_file": {
@@ -99,13 +109,22 @@ class ArgumentValidator:
                     return (
                         f"工具 '{tool_name}' 参数为空（可能是输出被截断）。\n"
                         f"建议：如果要写入大量代码，请分多次写入：\n"
-                        f"1. 先用 write_file 写入文件开头部分\n"
-                        f"2. 再用 append_file 追加剩余部分\n"
-                        f"3. 每次写入控制在 5000 字符以内"
+                        f"1. 优先使用 write_file_chunks / append_file_chunks\n"
+                        f"2. 或先用 write_file 写首段，再用 append_file 追加\n"
+                        f"3. 每次 content 控制在 3000 字符以内"
                     )
                 return f"工具 '{tool_name}' 缺少必填参数: {rules['required']}"
             return None
         
+        # 分块写工具参数别名兼容
+        if tool_name in ("write_file_chunks", "append_file_chunks"):
+            if "file_path" not in arguments:
+                alias = arguments.get("file") or arguments.get("path")
+                if isinstance(alias, str) and alias.strip():
+                    arguments["file_path"] = alias
+            if "chunks" not in arguments and isinstance(arguments.get("content"), str):
+                arguments["chunks"] = [arguments["content"]]
+
         # 1. 检查可疑值
         for key, value in arguments.items():
             error = cls._check_suspicious_value(key, value)
@@ -125,9 +144,16 @@ class ArgumentValidator:
                     return (
                         f"参数 'content' 为空。"
                         f"这通常是因为内容太长被截断了。"
-                        f"请分多次写入：先用 write_file 写第一部分，再用 append_file 追加其余部分。"
+                        f"请使用分块写入：write_file_chunks 或 append_file_chunks（每块 <= 3000 字符）。"
                     )
                 return f"参数 '{required_param}' 不能为空"
+
+        if tool_name in ("write_file_chunks", "append_file_chunks") and "chunks" in arguments:
+            chunks = arguments.get("chunks")
+            if not isinstance(chunks, list) or not chunks:
+                return "参数 'chunks' 必须是非空字符串数组"
+            if not all(isinstance(c, str) for c in chunks):
+                return "参数 'chunks' 必须全部是字符串"
         
         # 检查最小长度
         for param, min_len in rules.get("min_length", {}).items():
@@ -135,6 +161,16 @@ class ArgumentValidator:
                 value = arguments[param]
                 if isinstance(value, str) and len(value) < min_len:
                     return f"参数 '{param}' 长度不足（最少 {min_len} 字符）"
+
+        # 检查最大长度（避免单次参数过长被模型/网关截断）
+        for param, max_len in rules.get("max_length", {}).items():
+            if param in arguments:
+                value = arguments[param]
+                if isinstance(value, str) and len(value) > max_len:
+                    return (
+                        f"参数 '{param}' 过长（{len(value)} 字符，最大 {max_len}）。"
+                        f"请改用 write_file_chunks/append_file_chunks 分块写入。"
+                    )
         
         return None
     
@@ -219,6 +255,8 @@ class ArgumentValidator:
             "write_file": "write_file(file_path='path/to/file.py', content='文件内容')",
             "read_file": "read_file(file_path='path/to/file.py')",
             "append_file": "append_file(file_path='path/to/file.py', content='追加内容')",
+            "write_file_chunks": "write_file_chunks(file_path='path/to/file.py', chunks=['第一段','第二段'])",
+            "append_file_chunks": "append_file_chunks(file_path='path/to/file.py', chunks=['续写第一段','续写第二段'])",
             "delete_file": "delete_file(file_path='path/to/file.py')",
             "run_shell": "run_shell(command='ls -la')",
             "search_code": "search_code(pattern='def function_name')",

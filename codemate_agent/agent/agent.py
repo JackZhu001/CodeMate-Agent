@@ -144,7 +144,17 @@ class CodeMateAgent:
         self._todo_all_completed = False  # 所有 todo 是否完成
         self._last_completed_count = 0  # 最近一次完成的任务数
         self._rounds_since_todo = 0  # 距离上次更新 todo 的轮数
-        self._max_rounds_without_todo = 3  # 超过此轮数未更新 todo 则 nag
+        raw_todo_nag_interval = os.getenv("TODO_NAG_INTERVAL", "6")
+        try:
+            self._max_rounds_without_todo = int(raw_todo_nag_interval)
+        except ValueError:
+            self.logger.warning(
+                f"TODO_NAG_INTERVAL 无效值: {raw_todo_nag_interval}，回退默认 6"
+            )
+            self._max_rounds_without_todo = 6
+        nag_env_enabled = os.getenv("TODO_NAG_ENABLED", "true").lower() == "true"
+        self._todo_nag_enabled = nag_env_enabled and self._max_rounds_without_todo > 0
+        self._premature_finish_attempts = 0
 
         # 工具注册：将所有工具注册到注册器中
         # 这样可以通过工具名称快速查找和执行工具
@@ -388,7 +398,10 @@ class CodeMateAgent:
 
             # ========== Todo Nag Reminder ==========
             # 如果多轮未更新 todo，注入提醒
-            if self._rounds_since_todo >= self._max_rounds_without_todo:
+            if (
+                self._todo_nag_enabled
+                and self._rounds_since_todo >= self._max_rounds_without_todo
+            ):
                 self.logger.info(f"[nag] 超过 {self._rounds_since_todo} 轮未更新 todo，注入提醒")
                 self.messages.append(Message(
                     role="system",
@@ -570,6 +583,7 @@ class CodeMateAgent:
                     self.loop_detector.reset()
 
                 # LLM 请求调用工具，执行所有工具调用
+                used_todo_this_round = False
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.function.name
                     arguments = tool_call.function.arguments
@@ -594,6 +608,7 @@ class CodeMateAgent:
 
                     # ========== 更新 todo 进度跟踪 ==========
                     if tool_name == "todo_write":
+                        used_todo_this_round = True
                         # 使用了 todo 工具，重置计数器
                         self._rounds_since_todo = 0
                         self.logger.debug(f"使用了 todo_write，重置计数器")
@@ -602,10 +617,6 @@ class CodeMateAgent:
                         if self._check_todo_completion(result):
                             self._todo_all_completed = True
                             self.logger.info("检测到所有 todo 任务已完成")
-                    else:
-                        # 未使用 todo 工具，增加计数器
-                        self._rounds_since_todo += 1
-
                     # 触发工具调用完成事件
                     self._emit_progress("tool_call_end", {
                         "tool": tool_name,
@@ -621,6 +632,10 @@ class CodeMateAgent:
                         tool_call_id=tool_call.id,
                         name=tool_call.function.name
                     ))
+
+                # 每轮最多增加 1 次 nag 计数，避免单轮多工具导致计数暴涨
+                if not used_todo_this_round:
+                    self._rounds_since_todo += 1
                 
                 # 🆕 检测连续失败次数，超过阈值时强制停止并报告
                 if self._consecutive_failures >= self._max_consecutive_failures:
@@ -642,6 +657,26 @@ class CodeMateAgent:
                 
                 # 工具结果已添加，继续循环，让 LLM 处理工具结果
             else:
+                # 若存在未完成计划且回答为空/仅思考片段，强制继续执行，避免“提前结束”
+                if (
+                    self.planning_enabled
+                    and self.planner
+                    and self.planner.current_plan is not None
+                    and not self._todo_all_completed
+                    and not self._is_substantive_response(response.content or "")
+                    and self._premature_finish_attempts < 2
+                ):
+                    self._premature_finish_attempts += 1
+                    self.logger.warning("检测到计划未完成且响应内容不足，注入继续执行提示")
+                    self.messages.append(Message(
+                        role="system",
+                        content=(
+                            "当前计划尚未完成，请继续执行并产出实际结果。"
+                            "不要只输出思考过程；请调用合适工具完成文件写入或明确给出可交付产物。"
+                        ),
+                    ))
+                    continue
+
                 # 没有工具调用，说明 LLM 已经给出最终答案
                 self.logger.info(f"任务完成，共 {self.round_count} 轮")
                 self._emit_heartbeat("completed", source="run", total_rounds=self.round_count)
@@ -681,6 +716,16 @@ class CodeMateAgent:
             )
         self._emit_heartbeat("max_rounds", source="run", total_rounds=self.round_count)
         return f"已达到最大轮数 ({self.max_rounds})，无法完成任务。"
+
+    def _is_substantive_response(self, content: str) -> bool:
+        """判断响应是否包含可交付内容（过滤空白和纯 <think> 片段）。"""
+        text = (content or "").strip()
+        if not text:
+            return False
+        # 去除 think 标签后再判断
+        import re
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+        return bool(text)
 
     def _execute_tool_call(self, tool_call: ToolCall) -> str:
         """
@@ -1145,7 +1190,11 @@ class CodeMateAgent:
             idle_seconds=round(idle_seconds, 2),
         )
 
-        if (pending + in_progress) > 0 and idle_seconds > self.heartbeat_timeout_seconds:
+        if (
+            self._todo_nag_enabled
+            and (pending + in_progress) > 0
+            and idle_seconds > self.heartbeat_timeout_seconds
+        ):
             message = (
                 f"检测到待办未清空（pending={pending}, in_progress={in_progress}），"
                 f"且空闲 {idle_seconds:.1f}s"
@@ -1322,6 +1371,14 @@ class CodeMateAgent:
             "search_code": "search_code 使用方法:\n"
                            "- pattern: 搜索模式（字符串）\n"
                            "示例: search_code(pattern='def hello')",
+            "write_file_chunks": "write_file_chunks 使用方法:\n"
+                                "- file_path: 目标文件路径\n"
+                                "- chunks: 字符串数组（每块建议 <= 3000 字符）\n"
+                                "示例: write_file_chunks(file_path='site/index.html', chunks=['<html>...', '...'])",
+            "append_file_chunks": "append_file_chunks 使用方法:\n"
+                                 "- file_path: 目标文件路径\n"
+                                 "- chunks: 字符串数组（每块建议 <= 3000 字符）\n"
+                                 "示例: append_file_chunks(file_path='site/index.html', chunks=['后续内容'])",
         }
 
         if tool_name in hints:

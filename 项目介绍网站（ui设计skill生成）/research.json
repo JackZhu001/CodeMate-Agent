@@ -1,0 +1,58 @@
+{
+  "project_name": "CodeMate Agent",
+  "retrieval_results": [
+    {
+      "source": "github.com/datawhalechina/Hello-Agents",
+      "description": "Datawhale 社区的系统性智能体学习教程，是 CodeMate 项目的启发来源",
+      "key_points": [
+        "AI Native Agent 构建指南",
+        "上下文工程、Memory、协议、评估等技术",
+        "多智能体应用开发实战"
+      ]
+    },
+    {
+      "source": "github.com/feiskyer/koder",
+      "description": "实验性通用 AI 编程助手终端工具，CodeMate 参考的工程实现",
+      "key_points": [
+        "Universal AI Support (OpenAI/Anthropic/Google/100+ providers)",
+        "Smart Context with SQLite and automatic token-aware compression",
+        "Real-time Streaming with Rich terminal displays",
+        "Comprehensive Tools: file ops, search, shell, task delegation"
+      ]
+    },
+    {
+      "source": "MiniMax Documentation",
+      "description": "CodeMate 默认使用的 LLM 提供商",
+      "key_points": [
+        "MiniMax-M2 作为默认模型",
+        "需要针对 MiniMax 协议约束做兼容处理",
+        "支持文本协议解析和结构化工具调用恢复"
+      ]
+    }
+  ],
+  "tech_stack": {
+    "llm_provider": "MiniMax (默认), 兼容 OpenAI/Anthropic 等",
+    "storage": "SQLite (会话持久化)",
+    "compression": "三级压缩 (Micro/Auto/Manual)",
+    "ui": "Rich + prompt-toolkit"
+  },
+  "related_projects": [
+    {
+      "name": "Hello-Agents",
+      "url": "https://github.com/datawhalechina/Hello-Agents",
+      "relation": "学习教程来源"
+    },
+    {
+      "name": "Koder",
+      "url": "https://github.com/feiskyer/koder",
+      "relation": "工程参考"
+    },
+    {
+      "name": "OpenCode",
+      "url": "https://github.com/anomalyco/opencode",
+      "relation": "工程参考"
+    }
+  ],
+  "created_at": "2026-01-20",
+  "retrieval_count": 2
+}

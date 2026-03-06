@@ -4,10 +4,14 @@
 
 from pathlib import Path
 from codemate_agent.tools.base import Tool
+from codemate_agent.tools.utils import safe_path, PathSecurityError
 
 
 class ListDirectoryTool(Tool):
     """列出目录内容工具"""
+
+    def __init__(self, workspace_dir: str = None):
+        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
 
     @property
     def name(self) -> str:
@@ -24,9 +28,11 @@ class ListDirectoryTool(Tool):
 输出: 目录内容列表，包含文件/目录名称和类型"""
 
     def run(self, path: str = ".", recursive: bool = False, **kwargs) -> str:
-        root = Path(path)
-        if not root.is_absolute():
-            root = Path.cwd() / root
+        try:
+            # 使用安全路径检查
+            root = safe_path(path, self.workspace_dir)
+        except PathSecurityError as e:
+            return f"错误: {e}"
 
         if not root.exists():
             return f"错误: 目录不存在: {path}"

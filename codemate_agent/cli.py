@@ -19,7 +19,7 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.styles import Style
 
 from codemate_agent.config import Config, get_config
-from codemate_agent.llm.client import GLMClient
+from codemate_agent.llm.client import LLMClient
 from codemate_agent.agent import CodeMateAgent
 from codemate_agent.tools import get_all_tools
 from codemate_agent.logging import setup_logger, TraceLogger, SessionMetrics, generate_session_id, TraceEventType
@@ -49,7 +49,7 @@ def run_interactive(config: Config) -> None:
     config_table.add_row("上下文压缩", "启用" if config.persistence_enabled else "禁用")  # 与持久化同步
     config_table.add_row("任务规划", "启用" if config.persistence_enabled else "禁用")  # 与持久化同步
     config_table.add_row("工作目录", str(Path.cwd()))
-    console.print(Panel(config_table, title="[bold]当前配置[/bold]"))
+    console.print(Panel(config_table, title="[bold]✨ 当前配置[/bold]", border_style="bright_magenta"))
     console.print("")
 
     # 初始化日志系统
@@ -98,10 +98,12 @@ def run_interactive(config: Config) -> None:
 
     # 初始化 Agent
     try:
-        llm = GLMClient(
+        llm = LLMClient(
             api_key=config.api_key,
             model=config.model,
+            base_url=config.base_url,
             temperature=config.temperature,
+            provider=config.api_provider,
         )
         tools = get_all_tools()
 
@@ -124,7 +126,7 @@ def run_interactive(config: Config) -> None:
         )
     except Exception as e:
         console.print(f"[red]初始化失败: {e}[/red]")
-        console.print("\n[yellow]提示: 请确保已设置 GLM_API_KEY 环境变量或在 .env 文件中配置[/yellow]")
+        console.print("\n[yellow]提示: 请确保已设置 API_KEY 环境变量或在 .env 文件中配置[/yellow]")
         sys.exit(1)
 
     # 历史记录和样式
@@ -214,12 +216,12 @@ def run_interactive(config: Config) -> None:
     # 重新初始化 Agent，传入确认回调
     agent.confirm_callback = confirm_callback
 
-    console.print("[green]✓[/green] Agent 已就绪，输入问题开始对话（输入 'exit' 或 'quit' 退出）\n")
+    console.print("[green]✓[/green] Agent 已就绪，来聊天吧～（输入 'exit' 或 'quit' 退出）\n")
 
     while True:
         try:
             user_input = session.prompt(
-                'You > ',
+                '🐱 You > ',
                 auto_suggest=AutoSuggestFromHistory()
             ).strip()
 
@@ -243,7 +245,7 @@ def run_interactive(config: Config) -> None:
                 continue
 
             # 运行 Agent
-            console.print("\n[bold yellow]Agent:[/bold yellow] [dim]思考中...[/dim]\n")
+            console.print("\n[bold yellow]🐾 CodeMate:[/bold yellow] [dim]思考中...[/dim]\n")
 
             try:
                 result = agent.run(user_input)
@@ -327,10 +329,12 @@ def run_single_prompt(prompt: str, config: Config) -> None:
 
     # 初始化 Agent
     try:
-        llm = GLMClient(
+        llm = LLMClient(
             api_key=config.api_key,
             model=config.model,
+            base_url=config.base_url,
             temperature=config.temperature,
+            provider=config.api_provider,
         )
         tools = get_all_tools()
 
@@ -397,7 +401,7 @@ def main() -> None:
 示例:
   codemate                    # 交互模式
   codemate "分析这个项目"     # 单次查询
-  codemate --model glm-4-plus # 使用指定模型
+  codemate --model MiniMax-M2 # 使用指定模型
         """
     )
 
@@ -408,7 +412,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--model", "-m",
-        help="使用的模型 (默认: glm-4-flash)"
+        help="使用的模型 (默认: MiniMax-M2)"
     )
     parser.add_argument(
         "--max-rounds",
@@ -417,7 +421,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-key",
-        help="GLM API Key"
+        help="API Key"
     )
     parser.add_argument(
         "--version", "-v",

@@ -6,6 +6,7 @@
 
 from pathlib import Path
 from codemate_agent.tools.base import Tool
+from codemate_agent.tools.utils import safe_path, PathSecurityError
 
 
 class AppendFileTool(Tool):
@@ -14,6 +15,9 @@ class AppendFileTool(Tool):
 
     用于向文件末尾添加内容，常用于日志记录、增量更新等场景。
     """
+
+    def __init__(self, workspace_dir: str = None):
+        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
 
     @property
     def name(self) -> str:
@@ -62,9 +66,11 @@ class AppendFileTool(Tool):
         Returns:
             str: 操作结果
         """
-        path = Path(file_path)
-        if not path.is_absolute():
-            path = Path.cwd() / path
+        try:
+            # 使用安全路径检查
+            path = safe_path(file_path, self.workspace_dir)
+        except PathSecurityError as e:
+            return f"错误: {e}"
 
         try:
             # 如果文件不存在，创建父目录

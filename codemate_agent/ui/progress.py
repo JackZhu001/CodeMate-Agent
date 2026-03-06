@@ -38,14 +38,17 @@ class ProgressDisplay:
 
     def _show_round_progress(self) -> None:
         """显示轮次进度"""
+        width = 16
+        done = int((self.current_round / max(self.max_rounds, 1)) * width)
+        bar = "🟪" * done + "⬜" * (width - done)
         self.console.print(
             f"[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]\n"
-            f"[cyan]  Round {self.current_round}/{self.max_rounds}[/cyan]"
+            f"[cyan]🐾 Round {self.current_round}/{self.max_rounds}[/cyan]  {bar}"
         )
 
     def _show_tool_call(self, tool: str, args: str) -> None:
         """显示工具调用"""
         if args:
-            self.console.print(f"  [dim]└─[/dim] [yellow]{tool}[/yellow] [dim]({args})[/dim]")
+            self.console.print(f"  [dim]└─[/dim] 🛠️ [yellow]{tool}[/yellow] [dim]({args})[/dim]")
         else:
-            self.console.print(f"  [dim]└─[/dim] [yellow]{tool}[/yellow]")
+            self.console.print(f"  [dim]└─[/dim] 🛠️ [yellow]{tool}[/yellow]")

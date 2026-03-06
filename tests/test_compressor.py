@@ -194,7 +194,7 @@ def test_micro_compact_keeps_recent_rounds_and_whitelist():
         ))
         messages.append(Message(
             role="tool",
-            content=("X" * 180) + f"_{tool_name}",
+            content=("X" * 4200) + f"_{tool_name}",
             tool_call_id=call_id,
             name=tool_name,
         ))
@@ -202,7 +202,8 @@ def test_micro_compact_keeps_recent_rounds_and_whitelist():
     compressor = ContextCompressor(
         config=CompressionConfig(
             micro_compact_keep=3,
-            micro_compact_tool_whitelist=["todo_write"],
+            micro_compact_tool_denylist=["todo_write"],
+            context_window=100,
         )
     )
     result = compressor.micro_compact(messages)
@@ -211,9 +212,61 @@ def test_micro_compact_keeps_recent_rounds_and_whitelist():
     whitelisted_second = next(m for m in result if m.role == "tool" and m.name == "todo_write")
     recent_last = next(m for m in result if m.role == "tool" and m.name == "tool_5")
 
-    assert "已压缩" in compressed_first.content
+    assert "已裁剪" in compressed_first.content
     assert "已压缩" not in whitelisted_second.content
-    assert "已压缩" not in recent_last.content
+    assert "已裁剪" not in recent_last.content
+
+
+def test_micro_compact_hard_clear_threshold():
+    """当占比高且总量大时应触发 hard clear"""
+    messages = [Message(role="system", content="系统提示词")]
+    for i in range(8):
+        call_id = f"call_hard_{i}"
+        messages.append(Message(role="user", content=f"用户问题 {i}"))
+        messages.append(Message(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": call_id, "type": "function", "function": {"name": "huge_tool", "arguments": {}}}],
+        ))
+        messages.append(Message(
+            role="tool",
+            content="X" * 12000,
+            tool_call_id=call_id,
+            name="huge_tool",
+        ))
+
+    compressor = ContextCompressor(
+        config=CompressionConfig(
+            context_window=20000,
+            micro_compact_keep=3,
+        )
+    )
+    result = compressor.micro_compact(messages)
+    first_old_tool = next(m for m in result if m.role == "tool" and m.tool_call_id == "call_hard_0")
+    assert "Old tool result content cleared" in first_old_tool.content
+
+
+def test_micro_compact_skip_image_content():
+    """含图片标记的工具输出不应裁剪"""
+    messages = [
+        Message(role="system", content="系统提示词"),
+        Message(role="user", content="问题"),
+        Message(role="assistant", content="", tool_calls=[{"id": "c1", "type": "function", "function": {"name": "img_tool", "arguments": {}}}]),
+        Message(role="tool", content="data:image/png;base64,AAA" + ("X" * 5000), tool_call_id="c1", name="img_tool"),
+        Message(role="user", content="问题2"),
+        Message(role="assistant", content="", tool_calls=[{"id": "c2", "type": "function", "function": {"name": "text_tool", "arguments": {}}}]),
+        Message(role="tool", content="Y" * 5000, tool_call_id="c2", name="text_tool"),
+        Message(role="user", content="问题3"),
+        Message(role="assistant", content="", tool_calls=[{"id": "c3", "type": "function", "function": {"name": "text_tool", "arguments": {}}}]),
+        Message(role="tool", content="Z" * 5000, tool_call_id="c3", name="text_tool"),
+        Message(role="user", content="问题4"),
+        Message(role="assistant", content="", tool_calls=[{"id": "c4", "type": "function", "function": {"name": "text_tool", "arguments": {}}}]),
+        Message(role="tool", content="W" * 5000, tool_call_id="c4", name="text_tool"),
+    ]
+    compressor = ContextCompressor(config=CompressionConfig(context_window=100, micro_compact_keep=1))
+    result = compressor.micro_compact(messages)
+    image_tool = next(m for m in result if m.role == "tool" and m.tool_call_id == "c1")
+    assert "data:image/png" in image_tool.content
 
 
 def test_auto_compact_retains_system_and_last_three_rounds():

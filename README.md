@@ -30,18 +30,20 @@ CodeMate 试图把这条链路打通：
 
 ---
 
-## 💓 心跳机制的由来（OpenClaw 启发）
+## 💓 心跳机制
 
-在一次长任务联调中，我遇到过“终端看起来还在跑，但其实流程已经卡住”的情况。  
-这个痛点让我参考了 OpenClaw 一类 agent 编排思路，给 CodeMate 加入了**心跳 + 看门狗**：
-- 阶段心跳持续上报（round / llm / tool）
-- 后台周期唤醒检查待办（pending / in_progress）
-- 超时自动告警（watchdog）
-- `/heartbeat` 随时查看当前状态
+OpenClaw 官方文档将 heartbeat 定义为“**周期触发 agent turn**”。  
+CodeMate 结合这个思路，做了面向工程任务的轻量化落地：
+- 执行态心跳：关键阶段打点（round / llm / tool）
+- 后台轮询心跳：每隔 `HEARTBEAT_POLL_SECONDS` 唤醒一次，检查待办（pending / in_progress）
+- 看门狗告警：单次 LLM/工具调用超过 `HEARTBEAT_TIMEOUT_SECONDS` 触发超时告警
+- 状态可观测：`/heartbeat` 随时查看当前状态
 
-默认采用简化的 **task_polling** 模式（任务驱动轮询），避免过度复杂；如需完整详细打点，可切到 `HEARTBEAT_MODE=verbose`。
+默认采用简化的 **task_polling** 模式（任务驱动轮询）；如需完整详细打点，可切到 `HEARTBEAT_MODE=verbose`。  
+OpenClaw 参考链接：<https://github.com/openclaw/openclaw/blob/main/docs/gateway/heartbeat.md>
+如需暂时关闭 todo 催办提醒，可设置 `TODO_NAG_ENABLED=false`（或 `TODO_NAG_INTERVAL=0`）。
 
-目标很直接：让 Agent 不再“静默失败”，而是可观测、可定位、可恢复。
+目标是让 Agent 在长任务中的状态持续可观测、问题可定位、流程可恢复。
 
 常见应用场景：
 - 定期检查待办是否长期未推进（避免任务“挂着不动”）
@@ -74,14 +76,22 @@ pip install -r requirements.txt
 
 ### 2) 配置环境变量
 
-创建 `.env`（可参考 `.env.example`），至少提供：
+创建 `.env`，建议提供：
 
 ```bash
+API_PROVIDER=minimax
+BASE_URL=https://api.minimax.chat/v1
 API_KEY=your_api_key_here
-MODEL=glm-4-flash
+MODEL=MiniMax-M2
 ```
 
 ### 3) 启动
+
+```bash
+python -m codemate_agent.cli
+```
+
+或使用启动脚本：
 
 ```bash
 ./run.sh
@@ -105,6 +115,24 @@ MODEL=glm-4-flash
 - `/history <id>` 加载历史会话
 - `/memory` 查看长期记忆
 - `/save` 保存当前会话
+
+---
+
+## 🖼️ 界面截图（按你提供的编号）
+
+下面 6 张图按编号展示了典型使用链路：启动与配置 → 任务执行 → 产物展示。
+
+| 图 1：欢迎页与配置 | 图 2：会话交互 |
+| --- | --- |
+| ![CodeMate Screenshot 1](docs/images/readme/1.png) | ![CodeMate Screenshot 2](docs/images/readme/2.png) |
+
+| 图 3：任务执行过程 | 图 4：项目介绍页展示 |
+| --- | --- |
+| ![CodeMate Screenshot 3](docs/images/readme/3.png) | ![CodeMate Screenshot 4](docs/images/readme/4.png) |
+
+| 图 5：页面模块细节 | 图 6：页面模块细节 |
+| --- | --- |
+| ![CodeMate Screenshot 5](docs/images/readme/5.png) | ![CodeMate Screenshot 6](docs/images/readme/6.png) |
 
 ---
 
@@ -134,9 +162,12 @@ MODEL=glm-4-flash
 ## ⚙️ 压缩策略（当前实现）
 
 ### Micro Compact（每轮）
-- 针对 `role="tool"` 的旧工具输出做占位压缩
-- 默认保留最近 3 轮工具输出
-- 支持白名单（例如 `todo_write`）不压缩
+- 针对 `role="tool"` 的旧工具输出做分级处理（默认保留最近 3 轮不动）
+- **Soft Trim**：保留头尾片段（默认 1500 + 1500 字符），中间折叠
+- **Hard Clear**：将旧工具输出替换为占位符（保留“该处曾有工具结果”的语义）
+- 触发阈值按占比计算：`MICRO_SOFT_TRIM_RATIO`（默认 0.3）、`MICRO_HARD_CLEAR_RATIO`（默认 0.5）
+- Hard Clear 还要求可裁剪总量达到 `MICRO_HARD_CLEAR_MIN_CHARS`（默认 50000）
+- 支持工具白/黑名单、图片结果保护与最近轮次保护
 
 ### Auto Compact（超阈值）
 - 默认阈值：`context_window * 0.75`（默认窗口 200k）
@@ -148,11 +179,21 @@ MODEL=glm-4-flash
 
 ---
 
+## 🧩 MiniMax 兼容说明
+
+- 默认以 MiniMax-M2 作为主模型接入
+- 针对 MiniMax 的协议约束，已加入 system/tool 历史规整策略
+- 支持解析 `<minimax:tool_call>` 文本协议并恢复结构化工具调用
+
+---
+
 ## 📚 详细文档
 
 - [记忆与上下文工程详细说明](docs/memory_context_design.md)
 - [工作流说明](WORKFLOW.md)
 - [项目分析报告](PROJECT_ANALYSIS.md)
+- [项目报告（刷新版）](PROJECT_REPORT.md)
+- [代码审查报告（刷新版）](CODE_REVIEW_REPORT.md)
 
 ---
 

@@ -12,29 +12,21 @@ console = Console()
 
 
 BANNER = r"""
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║   ███╗   ██╗███████╗██╗    ██╗      ██╗  ██╗███████╗██╗     ║
-║   ████╗  ██║██╔════╝██║    ██║      ██║  ██║██╔════╝██║     ║
-║   ██╔██╗ ██║█████╗  ██║ █╗ ██║█████╗███████║█████╗  ██║     ║
-║   ██║╚██╗██║██╔══╝  ██║███╗██║╚════╝██╔══██║██╔══╝  ██║     ║
-║   ██║ ╚████║███████╗╚███╔███╔╝      ██║  ██║███████╗███████╗║
-║   ╚═╝  ╚═══╝╚══════╝ ╚══╝╚══╝       ╚═╝  ╚═╝╚══════╝╚══════╝║
-║                                                              ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
+   /ᐠ - ˕ -マ Ⳋ  CodeMate Agent
+  /  ▞   ▞   ⟡  Professional coding assistant
+ /   づ  づ
 """
 
 
 def print_banner() -> None:
     """打印欢迎横幅"""
-    console.print(BANNER, style="bold cyan")
+    console.print(Panel(BANNER, border_style="magenta", title="[bold pink1]🐾 Welcome[/bold pink1]"))
 
 
 def print_help() -> None:
     """打印帮助信息"""
     help_text = """
-可用命令:
+    🧸 可用命令:
 
   [cyan]/help[/cyan]       - 显示此帮助信息
   [cyan]/init[/cyan]       - 初始化项目 codemate.md 记忆文件
@@ -50,11 +42,11 @@ def print_help() -> None:
   [cyan]/save[/cyan]       - 保存当前会话
   [cyan]exit[/cyan]        - 退出程序
 
-Skills 使用:
+🌟 Skills 使用:
   - 输入 [green]/<skill-name> <参数>[/green] 执行 Skill
   - 例如: [green]/code-review src/agent/[/green]
 
-使用技巧:
+💡 使用技巧:
   - 可以问关于代码结构的问题
   - 可以请求分析特定文件
   - 可以搜索代码中的关键词

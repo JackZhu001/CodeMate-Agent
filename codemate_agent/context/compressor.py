@@ -24,8 +24,15 @@ from ..tools.todo.todo_write import TodoWriteTool
 DEFAULT_CONTEXT_WINDOW = 200000  # 默认上下文窗口
 DEFAULT_COMPRESSION_THRESHOLD = 0.75  # 75% 触发压缩
 DEFAULT_MIN_RETAIN_ROUNDS = 5  # 最少保留轮次（降低以便更早触发压缩）
-DEFAULT_MICRO_COMPACT_KEEP = 3  # Layer 1: 保留最近 3 轮 tool 输出
-DEFAULT_MICRO_COMPACT_TOOL_WHITELIST = ("todo_write",)
+DEFAULT_MICRO_COMPACT_KEEP = 3  # Layer 1: 保留最近 3 条 tool 输出
+DEFAULT_MICRO_COMPACT_TOOL_WHITELIST = ("todo_write",)  # 兼容旧配置：不压缩名单
+DEFAULT_MICRO_COMPACT_TOOL_ALLOWLIST = ()
+DEFAULT_MICRO_COMPACT_TOOL_DENYLIST = ("todo_write",)
+DEFAULT_MICRO_SOFT_TRIM_RATIO = 0.3
+DEFAULT_MICRO_HARD_CLEAR_RATIO = 0.5
+DEFAULT_MICRO_HARD_CLEAR_MIN_CHARS = 50000
+DEFAULT_MICRO_TRIM_HEAD = 1500
+DEFAULT_MICRO_TRIM_TAIL = 1500
 DEFAULT_TOKEN_THRESHOLD = 50000  # Layer 2: 50k token 触发自动压缩
 
 
@@ -36,24 +43,51 @@ class CompressionConfig:
     context_window: int = DEFAULT_CONTEXT_WINDOW
     compression_threshold: float = DEFAULT_COMPRESSION_THRESHOLD
     min_retain_rounds: int = DEFAULT_MIN_RETAIN_ROUNDS
-    micro_compact_keep: int = DEFAULT_MICRO_COMPACT_KEEP  # Layer 1 保留轮数
+    micro_compact_keep: int = DEFAULT_MICRO_COMPACT_KEEP  # Layer 1 保留条数
     micro_compact_tool_whitelist: List[str] = field(default_factory=lambda: list(DEFAULT_MICRO_COMPACT_TOOL_WHITELIST))
+    micro_compact_tool_allowlist: List[str] = field(default_factory=lambda: list(DEFAULT_MICRO_COMPACT_TOOL_ALLOWLIST))
+    micro_compact_tool_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_MICRO_COMPACT_TOOL_DENYLIST))
+    micro_soft_trim_ratio: float = DEFAULT_MICRO_SOFT_TRIM_RATIO
+    micro_hard_clear_ratio: float = DEFAULT_MICRO_HARD_CLEAR_RATIO
+    micro_hard_clear_min_chars: int = DEFAULT_MICRO_HARD_CLEAR_MIN_CHARS
+    micro_trim_head: int = DEFAULT_MICRO_TRIM_HEAD
+    micro_trim_tail: int = DEFAULT_MICRO_TRIM_TAIL
     token_threshold: int = 0  # Layer 2 阈值（<=0 时按 window*threshold 计算）
     transcript_dir: Optional[str] = None  # 记录保存目录
 
     @classmethod
     def from_env(cls) -> "CompressionConfig":
         """从环境变量加载配置"""
+        raw_allowlist = os.getenv(
+            "MICRO_COMPACT_TOOL_ALLOWLIST",
+            ",".join(DEFAULT_MICRO_COMPACT_TOOL_ALLOWLIST),
+        )
+        raw_denylist = os.getenv(
+            "MICRO_COMPACT_TOOL_DENYLIST",
+            ",".join(DEFAULT_MICRO_COMPACT_TOOL_DENYLIST),
+        )
         raw_whitelist = os.getenv(
             "MICRO_COMPACT_TOOL_WHITELIST",
             ",".join(DEFAULT_MICRO_COMPACT_TOOL_WHITELIST),
         )
+        deny_from_whitelist = [s.strip() for s in raw_whitelist.split(",") if s.strip()]
+        deny_list = [s.strip() for s in raw_denylist.split(",") if s.strip()]
+        for item in deny_from_whitelist:
+            if item not in deny_list:
+                deny_list.append(item)
         return cls(
             context_window=int(os.getenv("CONTEXT_WINDOW", str(DEFAULT_CONTEXT_WINDOW))),
             compression_threshold=float(os.getenv("COMPRESSION_THRESHOLD", str(DEFAULT_COMPRESSION_THRESHOLD))),
             min_retain_rounds=int(os.getenv("MIN_RETAIN_ROUNDS", str(DEFAULT_MIN_RETAIN_ROUNDS))),
             micro_compact_keep=int(os.getenv("MICRO_COMPACT_KEEP", str(DEFAULT_MICRO_COMPACT_KEEP))),
-            micro_compact_tool_whitelist=[s.strip() for s in raw_whitelist.split(",") if s.strip()],
+            micro_compact_tool_whitelist=deny_from_whitelist,
+            micro_compact_tool_allowlist=[s.strip() for s in raw_allowlist.split(",") if s.strip()],
+            micro_compact_tool_denylist=deny_list,
+            micro_soft_trim_ratio=float(os.getenv("MICRO_SOFT_TRIM_RATIO", str(DEFAULT_MICRO_SOFT_TRIM_RATIO))),
+            micro_hard_clear_ratio=float(os.getenv("MICRO_HARD_CLEAR_RATIO", str(DEFAULT_MICRO_HARD_CLEAR_RATIO))),
+            micro_hard_clear_min_chars=int(os.getenv("MICRO_HARD_CLEAR_MIN_CHARS", str(DEFAULT_MICRO_HARD_CLEAR_MIN_CHARS))),
+            micro_trim_head=int(os.getenv("MICRO_TRIM_HEAD", str(DEFAULT_MICRO_TRIM_HEAD))),
+            micro_trim_tail=int(os.getenv("MICRO_TRIM_TAIL", str(DEFAULT_MICRO_TRIM_TAIL))),
             token_threshold=int(os.getenv("TOKEN_THRESHOLD", "0")),
             transcript_dir=os.getenv("TRANSCRIPT_DIR", None),
         )
@@ -142,36 +176,78 @@ class ContextCompressor:
         Returns:
             压缩后的消息列表
         """
-        keep_rounds = self.config.micro_compact_keep
-        if keep_rounds <= 0:
+        keep_count = self.config.micro_compact_keep
+        if keep_count <= 0:
             return messages
 
-        system_messages = [m for m in messages if m.role == "system"]
-        non_system_messages = [m for m in messages if m.role != "system"]
-        rounds = self._identify_rounds(non_system_messages)
-        if len(rounds) <= keep_rounds:
+        first_user_idx = next((i for i, m in enumerate(messages) if m.role == "user"), len(messages))
+        allowlist = set(self.config.micro_compact_tool_allowlist)
+        denylist = set(self.config.micro_compact_tool_denylist) | set(self.config.micro_compact_tool_whitelist)
+
+        tool_candidates: List[Message] = []
+        for idx, msg in enumerate(messages):
+            if msg.role != "tool" or not isinstance(msg.content, str):
+                continue
+            if idx < first_user_idx:
+                continue
+            tool_name = msg.name or ""
+            if allowlist and tool_name not in allowlist:
+                continue
+            if tool_name in denylist:
+                continue
+            if self._looks_like_image_tool_result(msg.content):
+                continue
+            if len(msg.content) <= 100:
+                continue
+            tool_candidates.append(msg)
+
+        if len(tool_candidates) <= keep_count:
             return messages
 
-        retained_rounds = rounds[-keep_rounds:]
-        retained_tool_ids = {id(msg) for round_msgs in retained_rounds for msg in round_msgs if msg.role == "tool"}
-        whitelist = set(self.config.micro_compact_tool_whitelist)
-        cleared_count = 0
-        for msg in non_system_messages:
-            if msg.role != "tool":
-                continue
-            if id(msg) in retained_tool_ids:
-                continue
-            if msg.name in whitelist:
-                continue
-            if isinstance(msg.content, str) and len(msg.content) > 100:
-                tool_name = msg.name or "unknown"
-                msg.content = f"[工具输出已压缩: {tool_name}] 如需细节请重新读取相关文件/命令输出。"
-                cleared_count += 1
+        candidates_to_compact = tool_candidates[:-keep_count]
+        total_chars = sum(len(m.content) for m in candidates_to_compact if isinstance(m.content, str))
+        if total_chars == 0:
+            return messages
 
-        if cleared_count > 0:
-            self.logger.debug(f"Micro compact: 压缩了 {cleared_count} 条旧 tool 输出")
+        char_window = max(self.config.context_window * 4, 1)
+        ratio = total_chars / char_window
 
-        return system_messages + non_system_messages
+        hard_clear = ratio > self.config.micro_hard_clear_ratio and total_chars >= self.config.micro_hard_clear_min_chars
+        soft_trim = ratio > self.config.micro_soft_trim_ratio
+        if not (hard_clear or soft_trim):
+            return messages
+
+        changed_count = 0
+        for msg in candidates_to_compact:
+            tool_name = msg.name or "unknown"
+            if hard_clear:
+                msg.content = f"[Old tool result content cleared: {tool_name}] 如需细节请重新执行工具读取。"
+                changed_count += 1
+            else:
+                msg.content = self._soft_trim_tool_result(msg.content, tool_name)
+                changed_count += 1
+
+        if changed_count > 0:
+            mode = "hard_clear" if hard_clear else "soft_trim"
+            self.logger.debug(
+                f"Micro compact({mode}): 压缩了 {changed_count} 条旧 tool 输出, ratio={ratio:.2f}, chars={total_chars}"
+            )
+        return messages
+
+    def _soft_trim_tool_result(self, content: str, tool_name: str) -> str:
+        head = max(self.config.micro_trim_head, 0)
+        tail = max(self.config.micro_trim_tail, 0)
+        if len(content) <= head + tail + 20:
+            return content
+        return (
+            f"{content[:head]}\n\n...[tool result trimmed]...\n\n{content[-tail:]}\n\n"
+            f"[工具输出已裁剪: {tool_name}] 中间内容已省略，如需完整内容请重新读取。"
+        )
+
+    def _looks_like_image_tool_result(self, content: str) -> bool:
+        text = content.lower()
+        patterns = ("data:image/", "image/png", "image/jpeg", "image/webp", "![", "<img")
+        return any(p in text for p in patterns)
 
     # ========== Layer 2: Auto Compact ==========
 

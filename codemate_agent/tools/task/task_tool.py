@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from codemate_agent.llm.client import GLMClient
+from codemate_agent.llm.client import LLMClient as GLMClient
 from codemate_agent.prompts.agents_prompts import (
     get_subagent_prompt,
     get_default_model,

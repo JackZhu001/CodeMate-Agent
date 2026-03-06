@@ -79,6 +79,9 @@ class RunShellTool(Tool):
             # Unix/Linux/macOS 使用 bash
             shell_cmd = ["/bin/bash", "-c", command]
 
+        # 超时保护：避免模型设置过大 timeout 导致长时间卡住
+        timeout = max(1, min(int(timeout), 45))
+
         try:
             # 执行命令
             result = subprocess.run(

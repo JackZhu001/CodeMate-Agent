@@ -7,6 +7,7 @@
 from pathlib import Path
 from typing import Optional
 from codemate_agent.tools.base import Tool
+from codemate_agent.tools.utils import safe_path, PathSecurityError
 
 
 class EditFileTool(Tool):
@@ -16,6 +17,9 @@ class EditFileTool(Tool):
     使用 diff 格式精确修改文件，而不是覆盖整个文件。
     适用于只修改文件的一小部分内容。
     """
+
+    def __init__(self, workspace_dir: str = None):
+        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
 
     @property
     def name(self) -> str:
@@ -75,9 +79,11 @@ diff 格式说明:
         Returns:
             str: 操作结果
         """
-        path = Path(file_path)
-        if not path.is_absolute():
-            path = Path.cwd() / path
+        try:
+            # 使用安全路径检查
+            path = safe_path(file_path, self.workspace_dir)
+        except PathSecurityError as e:
+            return f"错误: {e}"
 
         # 检查文件是否存在
         if not path.exists():

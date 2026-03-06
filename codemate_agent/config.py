@@ -10,20 +10,26 @@ from typing import Optional
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
+# 模块加载时自动加载 .env 文件
+load_dotenv()
+
 
 @dataclass
 class Config:
     """应用配置"""
 
-    # GLM API 配置（主模型）
-    api_key: str = field(default_factory=lambda: os.getenv("GLM_API_KEY", ""))
-    model: str = field(default_factory=lambda: os.getenv("GLM_MODEL", "glm-4-flash"))
-    base_url: str = field(default_factory=lambda: os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/coding/paas/v4/"))
+    # API 提供商配置
+    api_provider: str = field(default_factory=lambda: os.getenv("API_PROVIDER", "minimax"))
+
+    # API 配置（支持多种提供商）
+    api_key: str = field(default_factory=lambda: os.getenv("API_KEY", ""))
+    model: str = field(default_factory=lambda: os.getenv("MODEL", "mini-max-chat"))
+    base_url: str = field(default_factory=lambda: os.getenv("BASE_URL", "https://api.minimaxi.com/anthropic/v1"))
 
     # Light 模型配置（用于简单任务的轻量模型）
-    light_model: str = field(default_factory=lambda: os.getenv("LIGHT_GLM_MODEL", "glm-4-flash"))
-    light_api_key: str = field(default_factory=lambda: os.getenv("LIGHT_GLM_API_KEY", ""))
-    light_base_url: str = field(default_factory=lambda: os.getenv("LIGHT_GLM_BASE_URL", ""))
+    light_model: str = field(default_factory=lambda: os.getenv("LIGHT_MODEL", ""))
+    light_api_key: str = field(default_factory=lambda: os.getenv("LIGHT_API_KEY", ""))
+    light_base_url: str = field(default_factory=lambda: os.getenv("LIGHT_BASE_URL", ""))
 
     # Agent 配置
     max_rounds: int = field(default_factory=lambda: int(os.getenv("MAX_ROUNDS", "50")))
@@ -73,7 +79,7 @@ class Config:
     def validate(self) -> tuple[bool, Optional[str]]:
         """验证配置有效性"""
         if not self.api_key:
-            return False, "未设置 GLM_API_KEY，请在 .env 文件中设置或使用环境变量"
+            return False, "未设置 API_KEY，请在 .env 文件中设置或使用环境变量"
         if self.max_rounds <= 0:
             return False, "MAX_ROUNDS 必须大于 0"
         if not 0 <= self.temperature <= 2:

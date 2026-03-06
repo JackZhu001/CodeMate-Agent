@@ -4,10 +4,14 @@
 
 from pathlib import Path
 from codemate_agent.tools.base import Tool
+from codemate_agent.tools.utils import safe_path, PathSecurityError
 
 
 class ReadFileTool(Tool):
     """读取文件内容工具"""
+
+    def __init__(self, workspace_dir: str = None):
+        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd()
 
     @property
     def name(self) -> str:
@@ -31,9 +35,11 @@ class ReadFileTool(Tool):
         }
 
     def run(self, file_path: str, **kwargs) -> str:
-        path = Path(file_path)
-        if not path.is_absolute():
-            path = Path.cwd() / path
+        try:
+            # 使用安全路径检查
+            path = safe_path(file_path, self.workspace_dir)
+        except PathSecurityError as e:
+            return f"错误: {e}"
 
         if not path.exists():
             return f"错误: 文件不存在: {file_path}"

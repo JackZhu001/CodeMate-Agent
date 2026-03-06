@@ -9,7 +9,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-from codemate_agent.llm.client import GLMClient
+from codemate_agent.llm.client import LLMClient as GLMClient
 from codemate_agent.schema import Message
 
 
@@ -74,6 +74,8 @@ class TaskPlanner:
 2. 步骤之间有逻辑依赖关系
 3. 最多 5-7 个步骤
 4. 每个步骤用简洁的中文描述（不超过 40 字）
+5. 外部搜索/联网步骤最多 2 步，失败后应切换到本地文档继续推进
+6. 如果任务涉及生成网页或长文档，计划中必须包含“分块写入文件（write_file_chunks/append_file_chunks）”
 
 请直接返回 JSON 格式，不要包含其他内容：
 {{
