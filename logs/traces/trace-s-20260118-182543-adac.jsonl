@@ -1,2 +1,0 @@
-{"ts": "2026-01-18T18:25:43.837873", "event": "session_start", "step": 0, "payload": {"session_id": "s-20260118-182543-adac"}, "session_id": "s-20260118-182543-adac"}
-{"ts": "2026-01-18T18:25:44.750482", "event": "session_end", "step": 0, "payload": {"duration_seconds": 0.912572, "stats": {"total_steps": 0, "llm_calls": 0, "tool_calls": 0, "total_input_tokens": 0, "total_output_tokens": 0, "errors": 0}}, "session_id": "s-20260118-182543-adac"}

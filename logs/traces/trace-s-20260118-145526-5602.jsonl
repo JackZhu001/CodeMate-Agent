@@ -1,4 +1,0 @@
-{"ts": "2026-01-18T14:55:26.532105", "event": "session_start", "step": 0, "payload": {"session_id": "s-20260118-145526-5602"}, "session_id": "s-20260118-145526-5602"}
-{"ts": "2026-01-18T14:56:00.202310", "event": "user_input", "step": 0, "payload": {"text": "这样会触发 skill，你可以对比效果。", "length": 20}, "session_id": "s-20260118-145526-5602"}
-{"ts": "2026-01-18T14:56:00.203903", "event": "llm_request", "step": 1, "payload": {"model": "glm-4.7", "messages_count": 2, "tools_count": 11}, "session_id": "s-20260118-145526-5602"}
-{"ts": "2026-01-18T14:56:28.008244", "event": "session_end", "step": 0, "payload": {"duration_seconds": 61.476118, "stats": {"total_steps": 0, "llm_calls": 1, "tool_calls": 0, "total_input_tokens": 0, "total_output_tokens": 0, "errors": 0}}, "session_id": "s-20260118-145526-5602"}

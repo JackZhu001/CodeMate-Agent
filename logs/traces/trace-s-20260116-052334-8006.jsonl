@@ -1,1 +1,0 @@
-{"ts": "2026-01-16T05:28:37.543515+00:00", "event": "session_end", "step": 0, "payload": {"duration_seconds": 303.529775, "stats": {"total_steps": 0, "llm_calls": 3, "tool_calls": 0, "total_input_tokens": 0, "total_output_tokens": 0, "errors": 3}}, "session_id": "s-20260116-052334-8006"}

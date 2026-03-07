@@ -1,2 +1,0 @@
-{"ts": "2026-01-18T20:59:24.200658", "event": "session_start", "step": 0, "payload": {"session_id": "s-20260118-205924-86a1"}, "session_id": "s-20260118-205924-86a1"}
-{"ts": "2026-01-18T20:59:31.515577", "event": "session_end", "step": 0, "payload": {"duration_seconds": 7.31487, "stats": {"total_steps": 0, "llm_calls": 0, "tool_calls": 0, "total_input_tokens": 0, "total_output_tokens": 0, "errors": 0}}, "session_id": "s-20260118-205924-86a1"}
