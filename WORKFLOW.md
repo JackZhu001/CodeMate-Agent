@@ -1,9 +1,9 @@
-# Oh-My-Claw 工作流说明（2026-03-31）
+# Oh-My-Claw 工作流说明（2026-04-21）
 
 ## 1. 主循环（ReAct + Function Calling）
 
 1. 接收用户输入
-2. 注入系统上下文（身份约束 + 记忆 + RepoRAG 片段）
+2. 注入系统上下文（身份约束 + 记忆 + Repo Map + RepoRAG 片段）
 3. 判断是否需要规划（Planner）
 4. 调用 LLM 获取回答或工具调用
 5. 若触发工具：执行 -> 回填 `tool` 消息 -> 继续下一轮
@@ -46,12 +46,23 @@
 
 ## 4. RepoRAG 路径
 
-1. 依据 query 计算检索词
-2. 从记忆、根目录文档、`docs/`、代码文件中召回片段
-3. 预算内拼装上下文注入 system prompt
-4. 再进入主循环决策
+1. 先用 Query Router 判断 query 类型：
+   `symbol_lookup / concept_lookup / scope_exploration`
+2. 若需要全局结构感，先生成 `Repo Map`
+3. 再从记忆、根目录文档、`docs/`、代码文件中召回片段
+4. Python 代码优先按 `function / class / method` 做 symbol-first 切块
+5. 在预算内拼装上下文注入 system prompt
+6. 再进入主循环决策
 
-作用：减少“无关历史”对当前任务的干扰，提高首轮决策命中率。
+作用：减少“无关历史”对当前任务的干扰，同时避免把所有问题都退化成纯字符串搜索。
+
+## 4.1 Skill 自动沉淀路径
+
+1. 任务执行完成后，记录成功轨迹（goal / tools / artifacts / outputs）
+2. 若有显式或自动建议的 `task_type`，则写入 skill capture 记录
+3. 同类任务在最近窗口内重复成功达到阈值后，生成 Skill 草稿
+4. 草稿写入 `.agents/skills-drafts/<skill_name>/`
+5. 人工通过 `/publish-skill-draft <name>` 发布到正式 `skills/`
 
 ## 5. Team 模式工作流
 

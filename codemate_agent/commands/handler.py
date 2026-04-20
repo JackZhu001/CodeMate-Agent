@@ -55,6 +55,7 @@ def handle_command(
         "/stats": lambda: _handle_stats(agent),
         "/tools": lambda: _handle_tools(agent),
         "/skills": lambda: _handle_skills(agent),
+        "/skill-drafts": lambda: _handle_skill_drafts(agent),
         "/sessions": lambda: _handle_sessions(session_index),
         "/memory": lambda: _handle_memory(memory_manager),
         "/rag": lambda: _handle_rag(agent, args),
@@ -68,6 +69,11 @@ def handle_command(
             _handle_history(args, agent, session_index, sessions_dir)
         else:
             console.print("[yellow]用法: /history <会话ID>[/yellow]\n")
+    elif cmd == "/publish-skill-draft":
+        if args:
+            _handle_publish_skill_draft(agent, args)
+        else:
+            console.print("[yellow]用法: /publish-skill-draft <draft-name>[/yellow]\n")
     else:
         print_error(f"未知命令: {command}")
         console.print("输入 /help 查看可用命令\n")
@@ -224,6 +230,51 @@ def _handle_skills(agent: "CodeMateAgent") -> None:
     else:
         console.print("[yellow]暂无可用 Skills[/yellow]")
         console.print(f"Skills 目录: {agent.skill_manager.skills_dir}")
+
+
+def _handle_skill_drafts(agent: "CodeMateAgent") -> None:
+    """处理 /skill-drafts 命令。"""
+    manager = getattr(agent, "skill_capture_manager", None)
+    if manager is None:
+        print_error("当前 Agent 不支持 skill 草稿管理")
+        return
+    drafts = manager.list_draft_summaries()
+    if not drafts:
+        console.print("[yellow]暂无 skill 草稿[/yellow]")
+        console.print(f"草稿目录: {manager.drafts_dir}")
+        return
+    console.print(f"[cyan]Skill 草稿 ({len(drafts)}):[/cyan]")
+    for draft in drafts:
+        tool_chain = " -> ".join(draft.primary_tool_chain[:4]) if draft.primary_tool_chain else "-"
+        artifact_types = ", ".join(draft.artifact_types) if draft.artifact_types else "-"
+        console.print(
+            f"  - [green]{draft.name}[/green] ({draft.status}) "
+            f"task_type={draft.task_type} confidence={draft.confidence:.2f} "
+            f"runs={draft.source_run_count}"
+        )
+        console.print(f"    tools: {tool_chain}", markup=False)
+        console.print(f"    artifacts: {artifact_types}", markup=False)
+        console.print(f"    created_at: {draft.created_at}", markup=False)
+        if draft.validation_errors:
+            console.print(
+                f"    validation_errors: {'; '.join(draft.validation_errors[:3])}",
+                markup=False,
+            )
+    console.print("\n使用方法: /publish-skill-draft <draft-name>")
+
+
+def _handle_publish_skill_draft(agent: "CodeMateAgent", draft_name: str) -> None:
+    """处理 /publish-skill-draft 命令。"""
+    manager = getattr(agent, "skill_capture_manager", None)
+    if manager is None:
+        print_error("当前 Agent 不支持 skill 草稿管理")
+        return
+    try:
+        published_path = manager.publish_skill_draft(draft_name.strip())
+    except Exception as exc:
+        print_error(str(exc))
+        return
+    print_success(f"✓ Skill 草稿已发布: {published_path}")
 
 
 def _handle_sessions(session_index: "SessionIndex | None") -> None:

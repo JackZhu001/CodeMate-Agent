@@ -141,8 +141,10 @@ class ProgressDisplay:
             count = self._to_int(data.get("chunks", 0))
             source_count = self._to_int(data.get("source_count", 0))
             total_chars = self._to_int(data.get("total_chars", 0))
+            mode = str(data.get("mode", "") or "").strip()
+            mode_text = f" [{mode}]" if mode else ""
             self.console.print(
-                f"  📚 RepoRAG: 命中 {count} 个片段 / {source_count} 个来源 ({total_chars} chars)",
+                f"  📚 RepoRAG{mode_text}: 命中 {count} 个片段 / {source_count} 个来源 ({total_chars} chars)",
                 style="bright_blue",
                 markup=False,
             )

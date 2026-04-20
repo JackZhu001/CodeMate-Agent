@@ -71,11 +71,13 @@ def print_help() -> None:
   [cyan]/stats[/cyan]      - 显示统计信息
   [cyan]/tools[/cyan]      - 列出可用工具
   [cyan]/skills[/cyan]     - 列出可用 Skills
+  [cyan]/skill-drafts[/cyan] - 列出待发布的 Skill 草稿
   [cyan]/sessions[/cyan]   - 列出历史会话
   [cyan]/history <id>[/cyan] - 加载指定会话
   [cyan]/memory[/cyan]     - 查看长期记忆
   [cyan]/rag <query>[/cyan] - 查看 RepoRAG 命中的项目上下文
   [cyan]/save[/cyan]       - 保存当前会话
+  [cyan]/publish-skill-draft <name>[/cyan] - 发布指定 Skill 草稿
   [cyan]exit[/cyan]        - 退出程序
 
 🌟 Skills 使用:

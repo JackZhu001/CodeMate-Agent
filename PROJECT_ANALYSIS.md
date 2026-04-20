@@ -1,4 +1,4 @@
-# Oh-My-Claw 项目分析（2026-03-31）
+# Oh-My-Claw 项目分析（2026-04-21）
 
 ## 1. 总体成熟度判断
 
@@ -35,7 +35,15 @@
 
 - 长期记忆负责跨会话事实保留
 - RepoRAG 负责 query-aware 片段召回
+- Repo Map 负责提供仓库骨架级结构摘要
+- Query Router 负责按 query 类型路由检索策略
 - 压缩器负责“已进入会话内容”的体量控制
+
+### 2.5 Skill 层（Skill + Skill Draft）
+
+- `SkillManager` 负责 Skill 索引和正文按需加载
+- `SkillCaptureManager` 负责成功轨迹记录、草稿生成、静态校验与发布
+- 当前策略是“自动生成草稿，不自动上线”，工程上更稳
 
 ### 2.5 观测层（Trace + Metrics + Heartbeat）
 
@@ -62,10 +70,13 @@ MiniMax 协议兼容、降级重试、参数修复、循环干预都在服务稳
 2. **任务板恢复策略仍有提升空间**  
 中断恢复与租约超时后自动回收需要更强一致性机制。
 
-3. **RepoRAG 在大仓库性能压力偏高**  
-重复扫描与切分会增加每轮时延，需要增量缓存。
+3. **RepoRAG / Repo Map 在大仓库性能压力偏高**  
+重复扫描、symbol 提取与切分会增加每轮时延，需要增量缓存。
 
-4. **安全策略尚可更细粒度**  
+4. **检索路由仍偏规则化**  
+当前 `symbol_lookup / concept_lookup / scope_exploration` 规则已经够用，但还没有显式接入 localization shortlist。
+
+5. **安全策略尚可更细粒度**  
 对 delegated shell 的高风险命令管理仍可更严格。
 
 ## 5. 建议路线（按优先级）
@@ -78,7 +89,8 @@ MiniMax 协议兼容、降级重试、参数修复、循环干预都在服务稳
 
 ### P1（近期完成）
 
-- RepoRAG 增量索引缓存
+- RepoRAG / Repo Map 增量索引缓存
+- `scope_exploration` 显式接入 localization / shortlist
 - 任务视图默认按会话隔离，减少历史任务干扰
 - 命令/阶段失败原因结构化编码，提升可观测性
 

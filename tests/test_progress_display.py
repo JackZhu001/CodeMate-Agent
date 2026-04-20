@@ -109,11 +109,12 @@ def test_progress_display_shows_repo_rag_summary():
 
     display.on_event(
         "repo_rag_retrieved",
-        {"chunks": 3, "source_count": 2, "total_chars": 1200},
+        {"mode": "concept_lookup", "chunks": 3, "source_count": 2, "total_chars": 1200},
     )
 
     output = stream.getvalue()
     assert "RepoRAG" in output
+    assert "concept_lookup" in output
     assert "3 个片段" in output
 
 

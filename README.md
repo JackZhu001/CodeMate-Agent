@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Agent](https://img.shields.io/badge/Agent-Team_Runtime-0ea5e9)
 ![Architecture](https://img.shields.io/badge/Pattern-Function_Calling-22c55e)
-![Tests](https://img.shields.io/badge/tests-172%20passed-16a34a)
+![Tests](https://img.shields.io/badge/tests-local%20passing-16a34a)
 ![Status](https://img.shields.io/badge/Focus-Engineering_Execution-f97316)
 
 > 一只会写代码、会看日志、会盯进度的工程猫爪助手。  
@@ -75,7 +75,7 @@ Oh-My-Claw 就是针对这组变化设计的：
 - 有失败保护：参数校验、循环检测、超时告警、协议修复
 - 有过程证据：任务板、事件日志、会话持久化、产物归档
 - 有长期可维护性：角色分工明确，模块边界清晰
-- 有回归保障：当前测试结果 `172 passed`
+- 有回归保障：本地当前回归结果 `182 passed`（2026-04-21）
 
 这意味着它不是一次性 demo，而是一条可以持续迭代、可被团队使用和复核的工程路线。
 
@@ -110,6 +110,9 @@ Oh-My-Claw 聚焦三件事：
 
 - Micro / Auto / Manual (`/compact`) 三层压缩
 - RepoRAG 检索注入（memory + 根目录文档 + docs + 代码片段）
+- 新增 `Repo Map`：先给仓库骨架，再给相关代码片段
+- 新增 `Query Router`：区分 `symbol_lookup / concept_lookup / scope_exploration`
+- Python 代码切块升级为 `symbol-first`（函数 / 类 / 方法优先）
 - 工具输出按类型截断（避免上下文被冗余输出占满）
 - 会话与 transcript 落盘，支持历史回读
 
@@ -120,7 +123,15 @@ Oh-My-Claw 聚焦三件事：
 - 任务板、请求跟踪、inbox、事件日志
 - 委托执行与产物归档（`.team/artifacts`）
 
-### 4) 可观测性
+### 4) Skill 系统
+
+- Skill 渐进式加载：索引层轻量注入，正文按需加载
+- 支持手动 `/skill-name` 调用与意图自动触发
+- 新增 Skill Draft 自动沉淀：重复成功流程生成待审核草稿
+- 草稿目录：`.agents/skills-drafts/`
+- 发布命令：`/publish-skill-draft <name>`
+
+### 5) 可观测性
 
 - 心跳与看门狗（超时告警）
 - 结构化 trace 与 metrics
@@ -134,7 +145,9 @@ Oh-My-Claw 聚焦三件事：
 flowchart TB
   U["CLI User"] --> A["CodeMateAgent"]
   A --> L["LLMClient"]
-  A --> R["RepoRAG"]
+  A --> Q["Query Router"]
+  Q --> RM["Repo Map"]
+  Q --> R["RepoRAG"]
   A --> C["ContextCompressor"]
   A --> G["LoopGuard / LoopDetector"]
   A --> H["HeartbeatMonitor"]
@@ -218,6 +231,8 @@ ohmyclaw
 - `/stats`：查看会话统计
 - `/tools`：查看当前工具列表
 - `/skills`：查看技能列表
+- `/skill-drafts`：查看待审核的 Skill 草稿
+- `/publish-skill-draft <name>`：发布 Skill 草稿
 - `/sessions`：查看历史会话索引
 - `/history <id>`：加载历史会话
 - `/memory`：查看长期记忆
@@ -269,8 +284,16 @@ task(agent_id="reviewer", description="一致性校验", prompt="检查标题与
 - `REPO_RAG_TOP_K`
 - `REPO_RAG_CHAR_BUDGET`
 - `REPO_RAG_CODE_ENABLED`
+- `REPO_RAG_MAP_ENABLED`
 - `REPO_RAG_CODE_ROOTS`
 - `REPO_RAG_CODE_EXTENSIONS`
+
+当前检索策略不是“无脑搜一遍仓库”，而是：
+
+1. 先判断 query 属于 `symbol_lookup / concept_lookup / scope_exploration`
+2. 决定是否先注入 `Repo Map`
+3. 再用 BM25 召回文档、记忆和 symbol-first 代码片段
+4. 最后在字符预算内拼装上下文
 
 ### Team 与观测
 
@@ -291,10 +314,10 @@ codemate_agent/
 ├── commands/       # CLI slash command 处理
 ├── context/        # 压缩与截断
 ├── llm/            # LLM 客户端与协议兼容
-├── retrieval/      # RepoRAG + BM25
+├── retrieval/      # RepoRAG + RepoMap + QueryRouter + BM25
 ├── team/           # coordinator/executor/task board/inbox/protocol
 ├── tools/          # file/search/shell/task/memory/todo 等工具
-├── skill/          # Skill 管理
+├── skill/          # Skill 管理 + Skill Draft 自动沉淀
 └── ui/             # 终端显示与进度输出
 ```
 

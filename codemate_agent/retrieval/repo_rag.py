@@ -10,8 +10,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import ast
 
 from .bm25 import bm25_rank, tokenize_text
+from .query_router import QueryRouter, RetrievalPlan
+from .repo_map import RepoMap, RepoMapContext
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,10 @@ class RetrievedChunk:
     path: str
     content: str
     score: float
+    chunk_type: str = "text"
+    symbol_name: str = ""
+    start_line: int = 0
+    end_line: int = 0
 
 
 @dataclass
@@ -30,9 +37,11 @@ class RetrievedContext:
     query: str
     chunks: list[RetrievedChunk]
     total_chars: int
+    repo_map: RepoMapContext | None = None
+    plan: RetrievalPlan | None = None
 
     def is_empty(self) -> bool:
-        return not self.chunks
+        return not self.chunks and (self.repo_map is None or self.repo_map.is_empty())
 
     @property
     def source_count(self) -> int:
@@ -43,10 +52,12 @@ class RetrievedContext:
         return [chunk.path or chunk.source for chunk in self.chunks]
 
     def to_prompt_text(self) -> str:
-        if not self.chunks:
+        if not self.chunks and (self.repo_map is None or self.repo_map.is_empty()):
             return ""
 
         parts = []
+        if self.repo_map is not None and not self.repo_map.is_empty():
+            parts.append(self.repo_map.to_prompt_text())
         for chunk in self.chunks:
             label = chunk.path or chunk.source
             parts.append(f"### {chunk.title} ({label})\n{chunk.content}")
@@ -117,22 +128,55 @@ class RepoRAG:
             1024,
             self._parse_int_env("REPO_RAG_CODE_MAX_FILE_BYTES", 200_000),
         )
+        self.repo_map_enabled = self.code_enabled and (
+            os.getenv("REPO_RAG_MAP_ENABLED", "true").lower() == "true"
+        )
+        self.repo_map = RepoMap(
+            workspace_dir=self.workspace_dir,
+            max_files=self.code_max_files,
+            max_file_bytes=self.code_max_file_bytes,
+            char_budget=min(900, max(300, self.char_budget // 3)),
+        ) if self.repo_map_enabled else None
+        self.query_router = QueryRouter()
 
     def retrieve(self, query: str, top_k: int | None = None) -> RetrievedContext:
         query = (query or "").strip()
+        plan = self.query_router.route(query, default_top_k=top_k or self.top_k)
         if not query:
-            return RetrievedContext(query=query, chunks=[], total_chars=0)
+            return RetrievedContext(query=query, chunks=[], total_chars=0, repo_map=None, plan=plan)
 
-        documents = self._build_documents()
+        repo_map_context = None
+        if plan.use_repo_map and self.repo_map is not None:
+            repo_map_context = self.repo_map.query(query, top_k=min(4, max(2, plan.top_k - 1)))
+
+        documents = self._build_documents() if plan.use_lexical else []
         if not documents:
-            return RetrievedContext(query=query, chunks=[], total_chars=0)
+            return RetrievedContext(
+                query=query,
+                chunks=[],
+                total_chars=repo_map_context.total_chars if repo_map_context else 0,
+                repo_map=repo_map_context,
+                plan=plan,
+            )
 
         query_tokens = tokenize_text(query)
         if not query_tokens:
-            return RetrievedContext(query=query, chunks=[], total_chars=0)
+            return RetrievedContext(
+                query=query,
+                chunks=[],
+                total_chars=repo_map_context.total_chars if repo_map_context else 0,
+                repo_map=repo_map_context,
+                plan=plan,
+            )
 
         scored = bm25_rank(documents, query_tokens)
-        selected_docs = self._select_documents(scored, top_k=top_k or self.top_k)
+        repo_map_chars = repo_map_context.total_chars if repo_map_context is not None else 0
+        remaining_budget = max(500, self.char_budget - repo_map_chars) if repo_map_chars else self.char_budget
+        selected_docs = self._select_documents(
+            scored,
+            top_k=plan.top_k,
+            char_budget=remaining_budget,
+        )
         chunks = [
             RetrievedChunk(
                 source=doc["source"],
@@ -140,11 +184,21 @@ class RepoRAG:
                 path=doc.get("path", ""),
                 content=doc["content"],
                 score=score,
+                chunk_type=doc.get("chunk_type", "text"),
+                symbol_name=doc.get("symbol_name", ""),
+                start_line=int(doc.get("start_line", 0)),
+                end_line=int(doc.get("end_line", 0)),
             )
             for doc, score in selected_docs
         ]
-        total_chars = sum(len(chunk.content) for chunk in chunks)
-        return RetrievedContext(query=query, chunks=chunks, total_chars=total_chars)
+        total_chars = sum(len(chunk.content) for chunk in chunks) + repo_map_chars
+        return RetrievedContext(
+            query=query,
+            chunks=chunks,
+            total_chars=total_chars,
+            repo_map=repo_map_context,
+            plan=plan,
+        )
 
     def _build_documents(self) -> list[dict[str, Any]]:
         docs: list[dict[str, Any]] = []
@@ -307,6 +361,7 @@ class RepoRAG:
                         "path": rel_path,
                         "content": trimmed,
                         "tokens": tokenize_text(trimmed),
+                        "chunk_type": "markdown",
                     }
                 )
 
@@ -322,11 +377,17 @@ class RepoRAG:
             "path": rel_path,
             "content": content,
             "tokens": tokenize_text(content),
+            "chunk_type": "markdown",
         }]
 
     def _split_code_document(self, text: str, rel_path: str) -> list[dict[str, Any]]:
         if not text.strip():
             return []
+
+        if rel_path.endswith(".py"):
+            symbol_docs = self._split_python_symbol_document(text, rel_path)
+            if symbol_docs:
+                return symbol_docs
 
         lines = text.splitlines()
         chunk_lines = 60
@@ -354,10 +415,72 @@ class RepoRAG:
                         "path": rel_path,
                         "content": trimmed,
                         "tokens": tokenize_text(trimmed),
+                        "chunk_type": "code_window",
+                        "start_line": start_line,
+                        "end_line": end_line,
                     }
                 )
 
         return docs
+
+    def _split_python_symbol_document(self, text: str, rel_path: str) -> list[dict[str, Any]]:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return []
+
+        lines = text.splitlines()
+        docs: list[dict[str, Any]] = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = self._build_python_symbol_chunk(lines, rel_path, node)
+                if doc:
+                    docs.append(doc)
+            elif isinstance(node, ast.ClassDef):
+                class_doc = self._build_python_symbol_chunk(lines, rel_path, node)
+                if class_doc:
+                    docs.append(class_doc)
+                for child in node.body:
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        doc = self._build_python_symbol_chunk(
+                            lines,
+                            rel_path,
+                            child,
+                            symbol_name=f"{node.name}.{child.name}",
+                        )
+                        if doc:
+                            docs.append(doc)
+        return docs
+
+    def _build_python_symbol_chunk(
+        self,
+        lines: list[str],
+        rel_path: str,
+        node: ast.AST,
+        *,
+        symbol_name: str | None = None,
+    ) -> dict[str, Any] | None:
+        start_line = getattr(node, "lineno", 0)
+        end_line = getattr(node, "end_lineno", start_line)
+        if start_line <= 0 or end_line < start_line:
+            return None
+        block = "\n".join(lines[start_line - 1:end_line]).strip()
+        if not block:
+            return None
+        chunk_text = self._trim_chunk(block, max_chars=700)
+        node_name = symbol_name or getattr(node, "name", Path(rel_path).stem)
+        chunk_type = "class" if isinstance(node, ast.ClassDef) else "function"
+        return {
+            "source": rel_path,
+            "title": f"{Path(rel_path).name}:{node_name}:{start_line}-{end_line}",
+            "path": rel_path,
+            "content": chunk_text,
+            "tokens": tokenize_text(f"{node_name}\n{chunk_text}"),
+            "chunk_type": chunk_type,
+            "symbol_name": node_name,
+            "start_line": start_line,
+            "end_line": end_line,
+        }
 
     def _parse_csv_env(self, key: str, default_values: tuple[str, ...]) -> list[str]:
         raw = os.getenv(key, "")
@@ -410,6 +533,7 @@ class RepoRAG:
         scored_docs: list[tuple[dict[str, Any], float]],
         *,
         top_k: int,
+        char_budget: int,
     ) -> list[tuple[dict[str, Any], float]]:
         selected: list[tuple[dict[str, Any], float]] = []
         by_source: dict[str, int] = {}
@@ -427,7 +551,7 @@ class RepoRAG:
             if not content:
                 continue
 
-            remaining = self.char_budget - used_chars
+            remaining = char_budget - used_chars
             if remaining <= 0:
                 break
 

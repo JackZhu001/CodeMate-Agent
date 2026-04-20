@@ -22,6 +22,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 import re
 
+from .capture import (
+    SkillCaptureManager,
+    SkillCaptureRecord,
+    SkillDraftMetadata,
+    SkillDraftSummary,
+    SkillDraftValidationResult,
+)
+
 
 @dataclass
 class Skill:
@@ -93,8 +101,9 @@ class SkillManager:
     - Layer 3 (references/scripts): 执行中按需加载 (无限)
     """
     
-    def __init__(self, skills_dir: Path = None):
+    def __init__(self, skills_dir: Path = None, extra_skills_dirs: Optional[list[Path]] = None):
         self.skills_dir = skills_dir or Path(__file__).parent.parent.parent / "skills"
+        self.extra_skills_dirs = [Path(item) for item in (extra_skills_dirs or [])]
         self._index: dict[str, str] = {}  # name -> description
         self._skill_dirs: dict[str, Path] = {}  # name -> skill directory
         self._cache: dict[str, Skill] = {}  # 完整内容缓存
@@ -103,25 +112,31 @@ class SkillManager:
     
     def _build_index(self) -> None:
         """启动时构建索引（只读 frontmatter）"""
-        if not self.skills_dir.exists():
-            return
-        
         trigger_rules = []
-        # 新结构: skills/skill-name/SKILL.md
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
+        for base_dir in self._iter_skill_roots():
+            if not base_dir.exists():
                 continue
-            
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                continue
-            
-            with open(skill_file, "r", encoding="utf-8") as f:
-                header = f.read(3000)  # 增大读取量以支持含 trigger 字段的 frontmatter
-            
-            meta = self._parse_frontmatter(header)
-            if meta.get("name"):
+
+            # 新结构: skills/skill-name/SKILL.md
+            for skill_dir in base_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
+
+                skill_file = skill_dir / "SKILL.md"
+                if not skill_file.exists():
+                    continue
+
+                with open(skill_file, "r", encoding="utf-8") as f:
+                    header = f.read(3000)  # 增大读取量以支持含 trigger 字段的 frontmatter
+
+                meta = self._parse_frontmatter(header)
+                if not meta.get("name"):
+                    continue
+
                 name = meta["name"]
+                if name in self._index:
+                    continue  # 前面的目录优先级更高
+
                 self._index[name] = meta.get("description", "")
                 self._skill_dirs[name] = skill_dir
 
@@ -141,6 +156,21 @@ class SkillManager:
 
         # 按 priority 排序（数字小 = 优先级高）
         self._trigger_rules = sorted(trigger_rules, key=lambda r: r["priority"])
+
+    def _iter_skill_roots(self) -> list[Path]:
+        """返回按优先级排序的 skill 根目录。"""
+        roots = [Path(self.skills_dir)]
+        roots.extend(self.extra_skills_dirs)
+
+        deduped: list[Path] = []
+        seen: set[Path] = set()
+        for root in roots:
+            resolved = root.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            deduped.append(root)
+        return deduped
     
     def _parse_frontmatter(self, text: str) -> dict:
         """解析 YAML frontmatter（支持多行值）"""
@@ -353,3 +383,14 @@ class SkillManager:
             "skills_dir": str(self.skills_dir),
             "available": list(self._index.keys()),
         }
+
+
+__all__ = [
+    "Skill",
+    "SkillManager",
+    "SkillCaptureManager",
+    "SkillCaptureRecord",
+    "SkillDraftMetadata",
+    "SkillDraftSummary",
+    "SkillDraftValidationResult",
+]

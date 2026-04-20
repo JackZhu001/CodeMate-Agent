@@ -90,6 +90,55 @@ def test_repo_rag_retrieves_code_facts_from_workspace(tmp_path):
     assert any(chunk.path == "codemate_agent/team/coordinator.py" for chunk in result.chunks)
 
 
+def test_repo_rag_includes_repo_map_summary(tmp_path):
+    memory = MemoryManager(tmp_path / "memory")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_dir = workspace / "codemate_agent" / "team"
+    package_dir.mkdir(parents=True)
+    (package_dir / "coordinator.py").write_text(
+        '"""Team coordination helpers."""\n\n'
+        "class TeamCoordinator:\n"
+        "    def dispatch_task(self, task):\n"
+        "        return task\n",
+        encoding="utf-8",
+    )
+
+    repo_rag = RepoRAG(workspace_dir=workspace, memory_manager=memory)
+    result = repo_rag.retrieve("team coordinator dispatch task")
+
+    prompt_text = result.to_prompt_text()
+    assert result.plan is not None
+    assert result.plan.mode == "concept_lookup"
+    assert "## Repo Map" in prompt_text
+    assert "codemate_agent/team/coordinator.py" in prompt_text
+    assert "TeamCoordinator" in prompt_text
+
+
+def test_repo_rag_python_code_chunking_is_symbol_first(tmp_path):
+    memory = MemoryManager(tmp_path / "memory")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package_dir = workspace / "codemate_agent"
+    package_dir.mkdir(parents=True)
+    (package_dir / "runtime.py").write_text(
+        "def helper(value):\n"
+        "    return value\n\n"
+        "class TeamRuntime:\n"
+        "    def boot(self):\n"
+        "        return True\n",
+        encoding="utf-8",
+    )
+
+    repo_rag = RepoRAG(workspace_dir=workspace, memory_manager=memory)
+    result = repo_rag.retrieve("TeamRuntime boot")
+
+    assert result.plan is not None
+    assert result.plan.mode == "symbol_lookup"
+    assert any(chunk.chunk_type in {"class", "function"} for chunk in result.chunks)
+    assert any(chunk.symbol_name == "TeamRuntime.boot" for chunk in result.chunks)
+
+
 def test_repo_rag_can_disable_code_channel(monkeypatch, tmp_path):
     monkeypatch.setenv("REPO_RAG_CODE_ENABLED", "false")
     memory = MemoryManager(tmp_path / "memory")

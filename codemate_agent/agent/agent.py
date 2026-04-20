@@ -34,7 +34,7 @@ from codemate_agent.planner import TaskPlanner
 from codemate_agent.retrieval import RepoRAG
 from codemate_agent.subagent import TaskTool
 from codemate_agent.validation import ArgumentValidator
-from codemate_agent.skill import SkillManager
+from codemate_agent.skill import SkillManager, SkillCaptureManager
 from codemate_agent.prompts import SYSTEM_PROMPT
 from codemate_agent.agent.loop_detector import LoopDetector
 from codemate_agent.agent.heartbeat import HeartbeatMonitor
@@ -119,6 +119,7 @@ class CodeMateAgent:
         self.confirm_callback = confirm_callback  # 用户确认回调
         self.plan_display_callback = plan_display_callback  # 计划显示回调
         self.progress_callback = progress_callback  # 进度回调
+        self._current_run_capture: dict[str, Any] | None = None
 
         # 日志系统
         self.logger = setup_logger("codemate.agent")
@@ -194,8 +195,17 @@ class CodeMateAgent:
         else:
             self.planner = None
 
-        # Skill 管理器（渐进式加载）
-        self.skill_manager = SkillManager()
+        # Skill 管理器（工作区优先，回退到内置 skills）
+        bundled_skills_dir = Path(__file__).parent.parent.parent / "skills"
+        self.skill_manager = SkillManager(
+            skills_dir=self.workspace_dir / "skills",
+            extra_skills_dirs=[bundled_skills_dir],
+        )
+        self.skill_capture_manager = SkillCaptureManager(
+            workspace_dir=self.workspace_dir,
+            tool_registry=self.tool_registry,
+            llm_client=self.light_llm or self.llm,
+        )
         self.skill_auto_trigger_enabled = os.getenv("SKILL_AUTO_TRIGGER_ENABLED", "true").lower() == "true"
 
         # Task 工具：用于委托子代理
@@ -355,6 +365,22 @@ class CodeMateAgent:
         │ 4. 重复直到有答案或达到最大轮数                            │
         └─────────────────────────────────────────────────────────────┘
         """
+        task_type, cleaned_query = self.skill_capture_manager.extract_task_type(query)
+        if task_type:
+            query = cleaned_query
+        else:
+            suggested_task_type = self.skill_capture_manager.suggest_task_type(query)
+            if suggested_task_type:
+                task_type = suggested_task_type
+                self._emit_progress(
+                    "task_type_suggested",
+                    {
+                        "task_type": task_type,
+                        "hint": "本次未显式标注 task_type，已根据请求内容自动建议并用于 skill 草稿沉淀。",
+                    },
+                )
+                self._emit_team_event("task_type_suggested", {"task_type": task_type})
+
         # 步骤 -1: 检查是否是 skill 命令
         if query.startswith("/"):
             skill_result = self._handle_skill_command(query)
@@ -402,6 +428,7 @@ class CodeMateAgent:
         # 保存到持久化存储
         if self.session_storage:
             self.session_storage.add_user_message(query)
+        self._start_run_capture(query, task_type)
 
         # ========== 三层上下文压缩 ==========
 
@@ -958,6 +985,7 @@ class CodeMateAgent:
                         step=self.round_count,
                     )
 
+                self._finalize_run_capture(response.content or "", success=True)
                 return response.content
 
         # 达到最大轮数仍未完成任务
@@ -970,6 +998,10 @@ class CodeMateAgent:
             )
         self.heartbeat.emit("max_rounds", source="run", total_rounds=self.round_count)
         self._emit_team_event("run_max_rounds", {"total_rounds": self.round_count})
+        self._finalize_run_capture(
+            f"已达到最大轮数 ({self.max_rounds})，无法完成任务。",
+            success=False,
+        )
         return f"已达到最大轮数 ({self.max_rounds})，无法完成任务。"
 
     def _is_substantive_response(self, content: str) -> bool:
@@ -1335,6 +1367,7 @@ class CodeMateAgent:
         if tool_name in DANGEROUS_TOOLS and self.confirm_callback is not None:
             # 调用确认回调，询问用户是否同意执行
             approved = self.confirm_callback(tool_name, arguments)
+            self._mark_run_manual_intervention()
             if not approved:
                 # 用户取消操作
                 result = f"用户取消了操作: {tool_name}"
@@ -1349,6 +1382,7 @@ class CodeMateAgent:
                 if self.metrics:
                     self.metrics.record_tool_call(tool_name, success=False)
 
+                self._record_run_tool_event(tool_name, arguments, result, success=False)
                 return result
 
             if self.trace_logger:
@@ -1393,6 +1427,7 @@ class CodeMateAgent:
                 if is_error:
                     self.metrics.record_error()
             self._emit_team_event("tool_result", {"tool": tool_name, "success": not is_error})
+            self._record_run_tool_event(tool_name, arguments, result, success=not is_error)
 
             return result
 
@@ -1422,6 +1457,7 @@ class CodeMateAgent:
                 "tool_result",
                 {"tool": tool_name, "success": False, "error": str(e)},
             )
+            self._record_run_tool_event(tool_name, arguments, error_msg, success=False)
 
             return error_msg
 
@@ -1499,6 +1535,7 @@ class CodeMateAgent:
                     "repo_rag_retrieved",
                     {
                         "query": query,
+                        "mode": repo_context.plan.mode if repo_context.plan is not None else "",
                         "chunks": len(repo_context.chunks),
                         "sources": repo_context.paths,
                         "source_count": repo_context.source_count,
@@ -1507,7 +1544,8 @@ class CodeMateAgent:
                 )
                 prompt_parts.append(f"\n{prompt_text}")
                 self.logger.debug(
-                    "[repo_rag] query=%r chunks=%s chars=%s sources=%s",
+                    "[repo_rag] mode=%s query=%r chunks=%s chars=%s sources=%s",
+                    repo_context.plan.mode if repo_context.plan is not None else "unknown",
                     query[:80],
                     len(repo_context.chunks),
                     repo_context.total_chars,
@@ -1763,6 +1801,87 @@ class CodeMateAgent:
                 Message(role="system", content=f"<background_results>{payload}</background_results>")
             )
 
+    def _start_run_capture(self, goal: str, task_type: Optional[str]) -> None:
+        """初始化当前运行的 skill 沉淀状态。"""
+        self._current_run_capture = {
+            "task_type": task_type,
+            "goal": goal,
+            "inputs": {"target_request": goal} if goal else {},
+            "steps": [],
+            "tool_calls": [],
+            "artifacts": set(),
+            "manual_intervention": False,
+        }
+
+    def _mark_run_manual_intervention(self) -> None:
+        if self._current_run_capture is not None:
+            self._current_run_capture["manual_intervention"] = True
+
+    def _record_run_tool_event(self, tool_name: str, arguments: dict[str, Any], result: str, *, success: bool) -> None:
+        if self._current_run_capture is None:
+            return
+        event = {
+            "tool": tool_name,
+            "arguments": self._sanitize_capture_arguments(arguments),
+            "success": success,
+        }
+        self._current_run_capture["tool_calls"].append(event)
+        self._current_run_capture["steps"].append({"tool": tool_name, "success": success})
+        self._current_run_capture["artifacts"].update(
+            self._extract_artifacts_from_tool(tool_name, arguments)
+        )
+
+    def _sanitize_capture_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        safe_args = {}
+        for key, value in (arguments or {}).items():
+            if key.lower() in {"content", "patch", "text"}:
+                safe_args[key] = "<omitted>"
+            else:
+                safe_args[key] = value
+        return safe_args
+
+    def _extract_artifacts_from_tool(self, tool_name: str, arguments: dict[str, Any]) -> set[str]:
+        artifact_paths: set[str] = set()
+        if not tool_name.startswith(("write_", "append_", "edit_", "delete_")):
+            return artifact_paths
+        for key in ("file_path", "path", "target_path"):
+            value = arguments.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            path = Path(value)
+            resolved = path if path.is_absolute() else self.workspace_dir / path
+            try:
+                normalized = resolved.resolve()
+            except OSError:
+                continue
+            if normalized.exists() and normalized.is_file():
+                try:
+                    artifact_paths.add(str(normalized.relative_to(self.workspace_dir)))
+                except ValueError:
+                    artifact_paths.add(str(normalized))
+        return artifact_paths
+
+    def _finalize_run_capture(self, final_answer: str, *, success: bool) -> None:
+        if self._current_run_capture is None:
+            return
+        capture = self._current_run_capture
+        self._current_run_capture = None
+        task_type = capture.get("task_type")
+        if not task_type:
+            return
+        self.skill_capture_manager.capture_successful_run(
+            run_id=f"{self.session_id}-{int(time.time() * 1000)}",
+            task_type=task_type,
+            goal=capture.get("goal", ""),
+            inputs=capture.get("inputs", {}),
+            steps=list(capture.get("steps", [])),
+            tool_calls=list(capture.get("tool_calls", [])),
+            artifacts=sorted(capture.get("artifacts", set())),
+            outputs={"final_answer": final_answer[:1000]},
+            success=success,
+            manual_intervention=bool(capture.get("manual_intervention")),
+        )
+
     def reset(self):
         """
         重置 Agent 状态
@@ -1778,6 +1897,7 @@ class CodeMateAgent:
         self.loop_detector.reset()  # 重置循环检测器
         self.loop_guard.reset()
         self._skill_injected = False  # 重置 skill 注入标记
+        self._current_run_capture = None
         if self.planner:
             self.planner.reset()
         # 清理 skill 缓存
@@ -1821,6 +1941,7 @@ class CodeMateAgent:
         """
         # 重置为初始状态（只有 system 消息）
         self.messages = [Message(role="system", content=self._get_system_prompt())]
+        self._current_run_capture = None
 
         # 加载历史消息
         for msg_dict in messages:
